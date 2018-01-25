@@ -1,16 +1,18 @@
 ### 使用方法
-0. 确保java8已被正确安装；
-1. 下载对应的jar文件和配置文件；
-2.运行```java -jar /path/to/jar_file/xxx.jar /path/to/config_file/xxx.json```；
+1. 确保java8已被正确安装；
+2. 下载对应的jar文件和配置文件；
+3. 运行：
+
+> ```java -jar /path/to/jar_file/xxx.jar /path/to/config_file/xxx.json```
 
 ### 配置文件说明
-1. 服务端配置：
+* 服务端配置：
   * listenAddress：服务端监听端口
   * listenPortList：服务端监听端口
   * bufferSize：缓冲区大小，请保持默认
   * privateKeyList：允许的密码列表
 
-2. 客户端配置：
+* 客户端配置：
   * listenAddress：客户端监听地址，一般请填写“localhost”或者“127.0.0.1”；
   * listenPort：客户端监听端口；
   * bufferSize：缓冲区大小，请保持默认；
