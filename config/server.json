@@ -1,0 +1,6 @@
+{
+  "listenAddress": "localhost",
+  "listenPortList": [9670, 9671],
+  "bufferSize": 2048,
+  "privateKeyList": ["hikari"]
+}

@@ -1,0 +1,10 @@
+# IDE
+.idea
+*.iml
+
+# java
+*.class
+
+# project
+target
+dependency-reduced-pom.xml
