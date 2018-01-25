@@ -8,3 +8,6 @@
 # project
 target
 dependency-reduced-pom.xml
+
+# env
+.DS_Store
