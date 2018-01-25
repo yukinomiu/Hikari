@@ -77,7 +77,8 @@ public class ClientHandler implements HikariHandle {
             clientLocalContext.setSelectionKey(localKey);
             clientLocalContext.setStatus(SocksStatus.SOCKS_AUTH);
         } catch (Exception e) {
-            logger.warn("handle accept exception: {}", e);
+            String msg = e.getMessage();
+            logger.warn("handle accept exception: {}", msg != null ? msg : e.getClass().getName());
         }
     }
 
@@ -118,7 +119,9 @@ public class ClientHandler implements HikariHandle {
             buffer.flip();
             remoteChannel.write(buffer);
         } catch (Exception e) {
-            logger.warn("handle connect exception: {}", e);
+            String msg = e.getMessage();
+            logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
+
             clientRemoteContext.close();
         } finally {
             buffer.clear();
@@ -175,7 +178,9 @@ public class ClientHandler implements HikariHandle {
                 throw new HikariRuntimeException(String.format("client context type '%s' not supported", type.name()));
             }
         } catch (Exception e) {
-            logger.warn("handle read exception: {}", e);
+            String msg = e.getMessage();
+            logger.warn("handle read exception: {}", msg != null ? msg : e.getClass().getName());
+
             clientContext.close();
         } finally {
             buffer.clear();
@@ -183,8 +188,9 @@ public class ClientHandler implements HikariHandle {
     }
 
     private void processSocksAuthRead(final SocketChannel socketChannel, final ClientLocalContext clientLocalContext) throws IOException {
-        socketChannel.read(buffer);
-        buffer.flip();
+        if (!read(socketChannel, clientLocalContext, buffer)) {
+            return;
+        }
 
         byte socksVer = buffer.get();
         if (socksVer != SocksConstants.VERSION_SOCKS5) {
@@ -205,8 +211,9 @@ public class ClientHandler implements HikariHandle {
     }
 
     private void processSocksReqRead(final SocketChannel socketChannel, final ClientLocalContext clientLocalContext) throws IOException {
-        socketChannel.read(buffer);
-        buffer.flip();
+        if (!read(socketChannel, clientLocalContext, buffer)) {
+            return;
+        }
 
         // ver
         buffer.get();
@@ -310,23 +317,18 @@ public class ClientHandler implements HikariHandle {
     }
 
     private void processSocksProxyRead(final SocketChannel socketChannel, final ClientLocalContext clientLocalContext) throws IOException {
-        int read = socketChannel.read(buffer);
-        if (read == -1) {
-            clientLocalContext.close();
-            return;
-        }
-        else if (read == 0) {
+        if (!read(socketChannel, clientLocalContext, buffer)) {
             return;
         }
 
         final SocketChannel remoteChannel = (SocketChannel) clientLocalContext.getRemoteContext().getSelectionKey().channel();
-        buffer.flip();
         remoteChannel.write(buffer);
     }
 
     private void processHikariAuthRead(final SocketChannel socketChannel, final ClientRemoteContext clientRemoteContext) throws IOException {
-        socketChannel.read(buffer);
-        buffer.flip();
+        if (!read(socketChannel, clientRemoteContext, buffer)) {
+            return;
+        }
 
         final ClientLocalContext clientLocalContext = clientRemoteContext.getLocalContext();
         final SocketChannel localSocketChannel = (SocketChannel) clientLocalContext.getSelectionKey().channel();
@@ -413,17 +415,11 @@ public class ClientHandler implements HikariHandle {
     }
 
     private void processHikariProxyRead(final SocketChannel socketChannel, final ClientRemoteContext clientRemoteContext) throws IOException {
-        int read = socketChannel.read(buffer);
-        if (read == -1) {
-            clientRemoteContext.close();
-            return;
-        }
-        else if (read == 0) {
+        if (!read(socketChannel, clientRemoteContext, buffer)) {
             return;
         }
 
         final SocketChannel localChannel = (SocketChannel) clientRemoteContext.getLocalContext().getSelectionKey().channel();
-        buffer.flip();
         localChannel.write(buffer);
     }
 

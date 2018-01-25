@@ -63,7 +63,8 @@ public class ServerHandler implements HikariHandle {
             context.setSelectionKey(newKey);
             context.setStatus(HikariStatus.HIKARI_AUTH);
         } catch (Exception e) {
-            logger.warn("handle accept exception: {}", e);
+            String msg = e.getMessage();
+            logger.warn("handle accept exception: {}", msg != null ? msg : e.getClass().getName());
         }
     }
 
@@ -117,7 +118,9 @@ public class ServerHandler implements HikariHandle {
             // set status
             serverClientContext.setStatus(HikariStatus.HIKARI_PROXY);
         } catch (Exception e) {
-            logger.warn("handle connect exception: {}", e);
+            String msg = e.getMessage();
+            logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
+
             serverTargetContext.close();
         } finally {
             buffer.clear();
@@ -157,7 +160,9 @@ public class ServerHandler implements HikariHandle {
                 throw new HikariRuntimeException(String.format("server context type '%s' not supported", type.name()));
             }
         } catch (Exception e) {
-            logger.warn("handle read exception: {}", e);
+            String msg = e.getMessage();
+            logger.warn("handle read exception: {}", msg != null ? msg : e.getClass().getName());
+
             serverContext.close();
         } finally {
             buffer.clear();
@@ -165,8 +170,9 @@ public class ServerHandler implements HikariHandle {
     }
 
     private void processHikariAuthRead(final SocketChannel socketChannel, final ServerClientContext serverClientContext) throws IOException {
-        socketChannel.read(buffer);
-        buffer.flip();
+        if (!read(socketChannel, serverClientContext, buffer)) {
+            return;
+        }
 
         // version
         final byte version = buffer.get();
@@ -253,32 +259,20 @@ public class ServerHandler implements HikariHandle {
     }
 
     private void processHikariProxyRead(final SocketChannel socketChannel, final ServerClientContext serverClientContext) throws IOException {
-        int read = socketChannel.read(buffer);
-        if (read == -1) {
-            serverClientContext.close();
-            return;
-        }
-        else if (read == 0) {
+        if (!read(socketChannel, serverClientContext, buffer)) {
             return;
         }
 
         final SocketChannel targetChannel = (SocketChannel) serverClientContext.getTargetContext().getSelectionKey().channel();
-        buffer.flip();
         targetChannel.write(buffer);
     }
 
     private void processTargetRead(SocketChannel socketChannel, ServerTargetContext serverTargetContext) throws IOException {
-        int read = socketChannel.read(buffer);
-        if (read == -1) {
-            serverTargetContext.close();
-            return;
-        }
-        else if (read == 0) {
+        if (!read(socketChannel, serverTargetContext, buffer)) {
             return;
         }
 
         final SocketChannel clientChannel = (SocketChannel) serverTargetContext.getClientContext().getSelectionKey().channel();
-        buffer.flip();
         clientChannel.write(buffer);
     }
 
