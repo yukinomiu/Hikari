@@ -1,9 +1,11 @@
 package com.github.yukinomiu.hikari.server;
 
+import com.github.yukinomiu.hikari.common.HikariConstant;
 import com.github.yukinomiu.hikari.common.HikariHandle;
 import com.github.yukinomiu.hikari.common.HikariStatus;
-import com.github.yukinomiu.hikari.common.constants.HikariConstants;
+import com.github.yukinomiu.hikari.common.PacketContext;
 import com.github.yukinomiu.hikari.common.exception.HikariRuntimeException;
+import com.github.yukinomiu.hikari.common.protocol.HikariProtocol;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.slf4j.Logger;
@@ -29,15 +31,18 @@ public class ServerHandler implements HikariHandle {
     private static final Logger logger = LoggerFactory.getLogger(ServerHandler.class);
 
     private final ServerConfig serverConfig;
-    private final ByteBuffer buffer;
+    private final ByteBuffer readBuffer;
+    private final ByteBuffer writeBuffer;
+
     private final Set<String> privateKeyHashSet;
 
     public ServerHandler(final ServerConfig serverConfig) {
         this.serverConfig = serverConfig;
 
         // init buffer
-        Integer bufferSize = serverConfig.getBufferSize();
-        buffer = ByteBuffer.allocateDirect(bufferSize);
+        Integer bufferSize = HikariConstant.BUFFER_SIZE;
+        readBuffer = ByteBuffer.allocateDirect(bufferSize);
+        writeBuffer = ByteBuffer.allocateDirect(bufferSize + 2);
 
         // init private keys
         List<String> privateKeyList = serverConfig.getPrivateKeyList();
@@ -57,11 +62,11 @@ public class ServerHandler implements HikariHandle {
             SocketChannel socketChannel = serverSocketChannel.accept();
             socketChannel.configureBlocking(false);
 
-            final ServerClientContext context = new ServerClientContext();
-            SelectionKey newKey = socketChannel.register(selector, SelectionKey.OP_READ, context);
+            final SelectionKey clientKey = socketChannel.register(selector, SelectionKey.OP_READ);
 
-            context.setSelectionKey(newKey);
-            context.setStatus(HikariStatus.HIKARI_AUTH);
+            PacketContext packetContext = new PacketContext(ByteBuffer.allocateDirect(writeBuffer.capacity()));
+            ServerClientContext clientContext = new ServerClientContext(clientKey, packetContext, HikariStatus.HIKARI_AUTH);
+            clientKey.attach(clientContext);
         } catch (Exception e) {
             String msg = e.getMessage();
             logger.warn("handle accept exception: {}", msg != null ? msg : e.getClass().getName());
@@ -81,7 +86,7 @@ public class ServerHandler implements HikariHandle {
                 targetChannel.finishConnect();
             } catch (IOException e) {
                 logger.warn("connect to target fail, msg: {}", e.getMessage());
-                writeAuthFailResponse(buffer, HikariConstants.AUTH_RESPONSE_CONNECT_TARGET_FAIL, clientChannel, serverTargetContext);
+                writeAuthFailResponse(HikariProtocol.AUTH_RESPONSE_CONNECT_TARGET_FAIL, clientChannel, serverTargetContext);
                 return;
             }
 
@@ -96,24 +101,23 @@ public class ServerHandler implements HikariHandle {
             final byte[] bindAddress = localAddress.getAddress();
 
             if (localAddress instanceof Inet4Address) {
-                bindHikariAddressType = HikariConstants.ADDRESS_TYPE_IPV4;
+                bindHikariAddressType = HikariProtocol.ADDRESS_TYPE_IPV4;
             }
             else if (localAddress instanceof Inet6Address) {
-                bindHikariAddressType = HikariConstants.ADDRESS_TYPE_IPV6;
+                bindHikariAddressType = HikariProtocol.ADDRESS_TYPE_IPV6;
             }
             else {
                 throw new HikariRuntimeException(String.format("address type '%s' not supported", localAddress.toString()));
             }
 
-            buffer.put(HikariConstants.VERSION_HIKARI1);
-            buffer.put(HikariConstants.AUTH_RESPONSE_OK);
-            buffer.put(bindHikariAddressType);
-            buffer.put(bindAddress);
-            buffer.putShort(port);
-
-            buffer.flip();
-
-            clientChannel.write(buffer);
+            writeBuffer.clear();
+            writeBuffer.put(HikariProtocol.VERSION_HIKARI1);
+            writeBuffer.put(HikariProtocol.AUTH_RESPONSE_OK);
+            writeBuffer.put(bindHikariAddressType);
+            writeBuffer.put(bindAddress);
+            writeBuffer.putShort(port);
+            writeBuffer.flip();
+            clientChannel.write(writeBuffer);
 
             // set status
             serverClientContext.setStatus(HikariStatus.HIKARI_PROXY);
@@ -122,8 +126,6 @@ public class ServerHandler implements HikariHandle {
             logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
 
             serverTargetContext.close();
-        } finally {
-            buffer.clear();
         }
     }
 
@@ -164,47 +166,45 @@ public class ServerHandler implements HikariHandle {
             logger.warn("handle read exception: {}", msg != null ? msg : e.getClass().getName());
 
             serverContext.close();
-        } finally {
-            buffer.clear();
         }
     }
 
     private void processHikariAuthRead(final SocketChannel socketChannel, final ServerClientContext serverClientContext) throws IOException {
-        if (!read(socketChannel, serverClientContext, buffer)) {
+        if (!readToBuffer(socketChannel, serverClientContext, readBuffer)) {
             return;
         }
 
         // version
-        final byte version = buffer.get();
-        if (version != HikariConstants.VERSION_HIKARI1) {
-            writeAuthFailResponse(buffer, HikariConstants.AUTH_RESPONSE_VERSION_NOT_SUPPORT, socketChannel, serverClientContext);
+        final byte version = readBuffer.get();
+        if (version != HikariProtocol.VERSION_HIKARI1) {
+            writeAuthFailResponse(HikariProtocol.AUTH_RESPONSE_VERSION_NOT_SUPPORT, socketChannel, serverClientContext);
             return;
         }
 
         // auth
         final byte[] auth = new byte[16];
-        buffer.get(auth);
+        readBuffer.get(auth);
         String keyHashHex = Hex.encodeHexString(auth);
         if (!privateKeyHashSet.contains(keyHashHex)) {
-            writeAuthFailResponse(buffer, HikariConstants.AUTH_RESPONSE_AUTH_FAIL, socketChannel, serverClientContext);
+            writeAuthFailResponse(HikariProtocol.AUTH_RESPONSE_AUTH_FAIL, socketChannel, serverClientContext);
             return;
         }
 
         // encrypt type
-        final byte encryptType = buffer.get();
-        if (encryptType != HikariConstants.ENCRYPT_PLAIN) {
-            writeAuthFailResponse(buffer, HikariConstants.AUTH_RESPONSE_ENCRYPT_TYPE_NOT_SUPPORT, socketChannel, serverClientContext);
+        final byte encryptType = readBuffer.get();
+        if (encryptType != HikariProtocol.ENCRYPT_PLAIN) {
+            writeAuthFailResponse(HikariProtocol.AUTH_RESPONSE_ENCRYPT_TYPE_NOT_SUPPORT, socketChannel, serverClientContext);
             return;
         }
 
         // address
-        final byte hikariAddressType = buffer.get();
+        final byte hikariAddressType = readBuffer.get();
         final byte[] address;
-        if (hikariAddressType == HikariConstants.ADDRESS_TYPE_DOMAIN) {
+        if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_DOMAIN) {
             // resolve
-            int length = buffer.get();
+            int length = readBuffer.get();
             byte[] tmpArray = new byte[length];
-            buffer.get(tmpArray, 0, length);
+            readBuffer.get(tmpArray, 0, length);
 
             String domainName = new String(tmpArray, StandardCharsets.US_ASCII);
             InetAddress inetAddress;
@@ -212,26 +212,26 @@ public class ServerHandler implements HikariHandle {
                 inetAddress = InetAddress.getByName(domainName);
             } catch (UnknownHostException e) {
                 logger.error("DNS resolve fail: {}", domainName);
-                writeAuthFailResponse(buffer, HikariConstants.AUTH_RESPONSE_DNS_RESOLVE_FAIL, socketChannel, serverClientContext);
+                writeAuthFailResponse(HikariProtocol.AUTH_RESPONSE_DNS_RESOLVE_FAIL, socketChannel, serverClientContext);
                 return;
             }
 
             address = inetAddress.getAddress();
         }
-        else if (hikariAddressType == HikariConstants.ADDRESS_TYPE_IPV4) {
+        else if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_IPV4) {
             address = new byte[4];
-            buffer.get(address, 0, 4);
+            readBuffer.get(address, 0, 4);
         }
-        else if (hikariAddressType == HikariConstants.ADDRESS_TYPE_IPV6) {
+        else if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_IPV6) {
             address = new byte[16];
-            buffer.get(address, 0, 16);
+            readBuffer.get(address, 0, 16);
         }
         else {
             throw new HikariRuntimeException(String.format("hikari address type '%s' not supported", hikariAddressType));
         }
 
         // port
-        final short port = buffer.getShort();
+        final short port = readBuffer.getShort();
 
         // connect to target
         InetAddress inetAddress = InetAddress.getByAddress(address);
@@ -243,46 +243,49 @@ public class ServerHandler implements HikariHandle {
         SocketChannel targetChannel = SocketChannel.open();
         targetChannel.configureBlocking(false);
 
-        ServerTargetContext targetContext = new ServerTargetContext();
-        final SelectionKey targetKey = targetChannel.register(selector, SelectionKey.OP_CONNECT, targetContext);
-
-        targetContext.setSelectionKey(targetKey);
-        targetContext.setClientContext(serverClientContext);
+        final SelectionKey targetKey = targetChannel.register(selector, SelectionKey.OP_CONNECT);
+        ServerTargetContext targetContext = new ServerTargetContext(targetKey, serverClientContext);
+        targetKey.attach(targetContext);
 
         serverClientContext.setTargetContext(targetContext);
 
         boolean connectedNow = targetChannel.connect(targetAddress);
         if (connectedNow) {
-            buffer.clear();
             handleConnect(targetKey);
         }
     }
 
     private void processHikariProxyRead(final SocketChannel socketChannel, final ServerClientContext serverClientContext) throws IOException {
-        if (!read(socketChannel, serverClientContext, buffer)) {
+        if (!readToBuffer(socketChannel, serverClientContext, readBuffer)) {
             return;
         }
 
         final SocketChannel targetChannel = (SocketChannel) serverClientContext.getTargetContext().getSelectionKey().channel();
-        targetChannel.write(buffer);
+        final PacketContext packetContext = serverClientContext.getPacketContext();
+
+        while (unwrapPacket(readBuffer, writeBuffer, packetContext)) {
+            targetChannel.write(writeBuffer);
+        }
     }
 
     private void processTargetRead(SocketChannel socketChannel, ServerTargetContext serverTargetContext) throws IOException {
-        if (!read(socketChannel, serverTargetContext, buffer)) {
+        if (!readToBuffer(socketChannel, serverTargetContext, readBuffer)) {
             return;
         }
 
+        wrapPacket(readBuffer, writeBuffer);
+
         final SocketChannel clientChannel = (SocketChannel) serverTargetContext.getClientContext().getSelectionKey().channel();
-        clientChannel.write(buffer);
+        clientChannel.write(writeBuffer);
     }
 
-    private void writeAuthFailResponse(final ByteBuffer buffer, final byte response, final SocketChannel socketChannel, final ServerContext serverContext) throws IOException {
-        buffer.clear();
-        buffer.put(HikariConstants.VERSION_HIKARI1);
-        buffer.put(response);
-        buffer.flip();
+    private void writeAuthFailResponse(final byte response, final SocketChannel socketChannel, final ServerContext serverContext) throws IOException {
+        writeBuffer.clear();
+        writeBuffer.put(HikariProtocol.VERSION_HIKARI1);
+        writeBuffer.put(response);
+        writeBuffer.flip();
 
-        socketChannel.write(buffer);
+        socketChannel.write(writeBuffer);
         serverContext.close();
     }
 }

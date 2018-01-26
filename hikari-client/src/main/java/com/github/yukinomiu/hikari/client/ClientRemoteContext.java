@@ -1,6 +1,7 @@
 package com.github.yukinomiu.hikari.client;
 
 import com.github.yukinomiu.hikari.common.HikariStatus;
+import com.github.yukinomiu.hikari.common.PacketContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,12 +18,19 @@ public class ClientRemoteContext extends ClientContext {
 
     private boolean closed = false;
 
-    private SelectionKey selectionKey;
-    private HikariStatus status;
-    private ClientLocalContext localContext;
+    private final SelectionKey selectionKey;
+    private final PacketContext packetContext;
+    private final ClientLocalContext localContext;
 
-    public ClientRemoteContext() {
+    private HikariStatus status;
+
+    public ClientRemoteContext(final SelectionKey selectionKey, final PacketContext packetContext, final ClientLocalContext localContext, final HikariStatus status) {
         super(ClientContextType.REMOTE);
+
+        this.selectionKey = selectionKey;
+        this.packetContext = packetContext;
+        this.localContext = localContext;
+        this.status = status;
     }
 
     @Override
@@ -52,8 +60,12 @@ public class ClientRemoteContext extends ClientContext {
         return selectionKey;
     }
 
-    public void setSelectionKey(SelectionKey selectionKey) {
-        this.selectionKey = selectionKey;
+    public ClientLocalContext getLocalContext() {
+        return localContext;
+    }
+
+    public PacketContext getPacketContext() {
+        return packetContext;
     }
 
     public HikariStatus getStatus() {
@@ -62,13 +74,5 @@ public class ClientRemoteContext extends ClientContext {
 
     public void setStatus(HikariStatus status) {
         this.status = status;
-    }
-
-    public ClientLocalContext getLocalContext() {
-        return localContext;
-    }
-
-    public void setLocalContext(ClientLocalContext localContext) {
-        this.localContext = localContext;
     }
 }

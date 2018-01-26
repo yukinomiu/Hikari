@@ -1,11 +1,11 @@
-package com.github.yukinomiu.hikari.common.constants;
+package com.github.yukinomiu.hikari.common.protocol;
 
 /**
  * Yukinomiu
  * 2017/12/27
  */
-public class SocksConstants {
-    private SocksConstants() {
+public class SocksProtocol {
+    private SocksProtocol() {
     }
 
     // address type

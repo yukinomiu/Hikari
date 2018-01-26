@@ -9,7 +9,6 @@ import java.util.List;
 public class ServerConfig {
     private String listenAddress;
     private List<Integer> listenPortList;
-    private Integer bufferSize;
     private List<String> privateKeyList;
 
     public String getListenAddress() {
@@ -26,14 +25,6 @@ public class ServerConfig {
 
     public void setListenPortList(List<Integer> listenPortList) {
         this.listenPortList = listenPortList;
-    }
-
-    public Integer getBufferSize() {
-        return bufferSize;
-    }
-
-    public void setBufferSize(Integer bufferSize) {
-        this.bufferSize = bufferSize;
     }
 
     public List<String> getPrivateKeyList() {

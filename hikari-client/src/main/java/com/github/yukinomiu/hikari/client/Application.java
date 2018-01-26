@@ -34,7 +34,6 @@ public class Application {
         logger.info("load config success");
 
 
-
         // start client
         final Client client = new Client(clientConfig);
         try {

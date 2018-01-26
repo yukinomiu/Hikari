@@ -1,7 +1,6 @@
 {
   "listenAddress": "localhost",
   "listenPort": 1180,
-  "bufferSize": 2048,
   "localDnsResolve": false,
   "serverAddress": "localhost",
   "serverPortList": [9670, 9671],

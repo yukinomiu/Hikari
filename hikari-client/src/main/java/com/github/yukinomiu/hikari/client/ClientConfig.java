@@ -9,7 +9,6 @@ import java.util.List;
 public class ClientConfig {
     private String listenAddress;
     private Integer listenPort;
-    private Integer bufferSize;
     private Boolean localDnsResolve;
 
     private String serverAddress;
@@ -30,14 +29,6 @@ public class ClientConfig {
 
     public void setListenPort(Integer listenPort) {
         this.listenPort = listenPort;
-    }
-
-    public Integer getBufferSize() {
-        return bufferSize;
-    }
-
-    public void setBufferSize(Integer bufferSize) {
-        this.bufferSize = bufferSize;
     }
 
     public Boolean getLocalDnsResolve() {

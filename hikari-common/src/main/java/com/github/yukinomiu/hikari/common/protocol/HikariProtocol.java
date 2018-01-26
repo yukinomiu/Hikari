@@ -1,11 +1,11 @@
-package com.github.yukinomiu.hikari.common.constants;
+package com.github.yukinomiu.hikari.common.protocol;
 
 /**
  * Yukinomiu
  * 2018/1/24
  */
-public class HikariConstants {
-    private HikariConstants() {
+public class HikariProtocol {
+    private HikariProtocol() {
     }
 
     // version

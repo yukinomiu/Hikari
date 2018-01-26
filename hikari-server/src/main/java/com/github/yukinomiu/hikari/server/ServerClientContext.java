@@ -1,6 +1,7 @@
 package com.github.yukinomiu.hikari.server;
 
 import com.github.yukinomiu.hikari.common.HikariStatus;
+import com.github.yukinomiu.hikari.common.PacketContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,12 +18,18 @@ public class ServerClientContext extends ServerContext {
 
     private boolean closed = false;
 
-    private SelectionKey selectionKey;
+    private final SelectionKey selectionKey;
+    private final PacketContext packetContext;
+
     private HikariStatus status;
     private ServerTargetContext targetContext;
 
-    public ServerClientContext() {
+    public ServerClientContext(final SelectionKey selectionKey, final PacketContext packetContext, final HikariStatus status) {
         super(ServerContextType.CLIENT);
+
+        this.selectionKey = selectionKey;
+        this.packetContext = packetContext;
+        this.status = status;
     }
 
     @Override
@@ -52,8 +59,8 @@ public class ServerClientContext extends ServerContext {
         return selectionKey;
     }
 
-    public void setSelectionKey(SelectionKey selectionKey) {
-        this.selectionKey = selectionKey;
+    public PacketContext getPacketContext() {
+        return packetContext;
     }
 
     public HikariStatus getStatus() {

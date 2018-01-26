@@ -16,11 +16,14 @@ public class ServerTargetContext extends ServerContext {
 
     private boolean closed = false;
 
-    private SelectionKey selectionKey;
-    private ServerClientContext clientContext;
+    private final SelectionKey selectionKey;
+    private final ServerClientContext clientContext;
 
-    public ServerTargetContext() {
+    public ServerTargetContext(final SelectionKey selectionKey, final ServerClientContext clientContext) {
         super(ServerContextType.TARGET);
+
+        this.selectionKey = selectionKey;
+        this.clientContext = clientContext;
     }
 
     @Override
@@ -50,15 +53,7 @@ public class ServerTargetContext extends ServerContext {
         return selectionKey;
     }
 
-    public void setSelectionKey(SelectionKey selectionKey) {
-        this.selectionKey = selectionKey;
-    }
-
     public ServerClientContext getClientContext() {
         return clientContext;
-    }
-
-    public void setClientContext(ServerClientContext clientContext) {
-        this.clientContext = clientContext;
     }
 }

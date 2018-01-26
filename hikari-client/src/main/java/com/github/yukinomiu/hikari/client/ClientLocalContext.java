@@ -17,7 +17,8 @@ public class ClientLocalContext extends ClientContext {
 
     private boolean closed = false;
 
-    private SelectionKey selectionKey;
+    private final SelectionKey selectionKey;
+
     private SocksStatus status;
     private ClientRemoteContext remoteContext;
 
@@ -25,8 +26,11 @@ public class ClientLocalContext extends ClientContext {
     private byte[] address;
     private byte[] port;
 
-    public ClientLocalContext() {
+    public ClientLocalContext(final SelectionKey selectionKey, final SocksStatus status) {
         super(ClientContextType.LOCAL);
+
+        this.selectionKey = selectionKey;
+        this.status = status;
     }
 
     @Override
@@ -54,10 +58,6 @@ public class ClientLocalContext extends ClientContext {
 
     public SelectionKey getSelectionKey() {
         return selectionKey;
-    }
-
-    public void setSelectionKey(SelectionKey selectionKey) {
-        this.selectionKey = selectionKey;
     }
 
     public SocksStatus getStatus() {
