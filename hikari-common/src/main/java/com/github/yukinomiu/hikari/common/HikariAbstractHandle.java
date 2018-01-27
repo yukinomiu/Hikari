@@ -1,12 +1,14 @@
 package com.github.yukinomiu.hikari.common;
 
+import com.github.yukinomiu.hikari.common.crypto.AESCrypto;
 import com.github.yukinomiu.hikari.common.crypto.HikariCrypto;
 import com.github.yukinomiu.hikari.common.exception.HikariChecksumFailException;
-import com.github.yukinomiu.hikari.common.exception.HikariDecryptException;
-import com.github.yukinomiu.hikari.common.exception.HikariEncryptException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.util.zip.CRC32;
 
@@ -15,11 +17,101 @@ import java.util.zip.CRC32;
  * 2018/1/26
  */
 public abstract class HikariAbstractHandle implements HikariHandle {
+    private static final Logger logger = LoggerFactory.getLogger(HikariAbstractHandle.class);
 
     private final CRC32 crc32 = new CRC32();
 
-    protected boolean read(final SocketChannel srcChannel, final ByteBuffer dstBuffer, final HikariContext context) throws IOException {
-        // dstBuffer.clear();
+    protected final ByteBuffer dataBuffer;
+    private final ByteBuffer cryptoBuffer;
+    private final ByteBuffer packetBuffer;
+
+    private final HikariCrypto hikariCrypto;
+
+    protected HikariAbstractHandle(final HikariConfig hikariConfig) {
+        // buffer
+        final Integer bufferSize = hikariConfig.getBufferSize();
+        dataBuffer = ByteBuffer.allocateDirect(bufferSize);
+        cryptoBuffer = ByteBuffer.allocateDirect(bufferSize);
+        packetBuffer = ByteBuffer.allocateDirect(bufferSize + HikariConstant.PACKET_WRAPPER_SIZE);
+
+        // crypto
+        hikariCrypto = new AESCrypto("secret");
+    }
+
+    @Override
+    public final void handleRead(final SelectionKey selectionKey) {
+        final SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
+        final HikariContext hikariContext = (HikariContext) selectionKey.attachment();
+
+        try {
+            if (hikariContext instanceof EncryptTransfer) {
+                final EncryptTransfer encryptTransfer = (EncryptTransfer) hikariContext;
+
+                // read
+                packetBuffer.clear();
+                if (!read(socketChannel, packetBuffer, hikariContext)) {
+                    return;
+                }
+                packetBuffer.flip();
+
+                // unwrap packet and decrypt
+                final PacketContext packetContext = encryptTransfer.getPacketContext();
+
+                cryptoBuffer.clear();
+                while (unwrapPacket(packetBuffer, cryptoBuffer, packetContext)) {
+                    cryptoBuffer.flip();
+
+                    // decrypt
+                    dataBuffer.clear();
+                    hikariCrypto.decrypt(cryptoBuffer, dataBuffer);
+                    dataBuffer.flip();
+
+                    consumeData(selectionKey, socketChannel, dataBuffer, hikariContext);
+                    cryptoBuffer.clear();
+                }
+            }
+            else {
+                // read
+                dataBuffer.clear();
+                if (!read(socketChannel, dataBuffer, hikariContext)) {
+                    return;
+                }
+                dataBuffer.flip();
+
+                // handle plain
+                consumeData(selectionKey, socketChannel, dataBuffer, hikariContext);
+            }
+        } catch (HikariChecksumFailException e) {
+            logger.warn("checksum verifying fail");
+            hikariContext.close();
+        } catch (Exception e) {
+            logger.warn("handle read exception: {}", e.getMessage(), e);
+            hikariContext.close();
+        }
+    }
+
+    protected abstract void consumeData(final SelectionKey selectionKey, final SocketChannel socketChannel, final ByteBuffer data, final HikariContext hikariContext) throws Exception;
+
+    protected final void encryptWrite(final ByteBuffer dataBuffer, final SocketChannel targetChannel) throws IOException {
+        // encrypt
+        cryptoBuffer.clear();
+        hikariCrypto.encrypt(dataBuffer, cryptoBuffer);
+        cryptoBuffer.flip();
+
+        // warp
+        packetBuffer.clear();
+        wrapPacket(cryptoBuffer, packetBuffer);
+        packetBuffer.flip();
+
+        // write
+        targetChannel.write(packetBuffer);
+    }
+
+    protected final PacketContext getNewPacketContext() {
+        return new PacketContext(packetBuffer.capacity());
+    }
+
+    private boolean read(final SocketChannel srcChannel, final ByteBuffer dstBuffer, final HikariContext context) throws IOException {
         int read = srcChannel.read(dstBuffer);
 
         if (read == -1) {
@@ -30,23 +122,10 @@ public abstract class HikariAbstractHandle implements HikariHandle {
             return false;
         }
 
-        // dstBuffer.flip();
         return true;
     }
 
-    protected void encrypt(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer, final HikariCrypto hikariCrypto) throws HikariEncryptException {
-        // dstBuffer.clear();
-        hikariCrypto.encrypt(srcBuffer, dstBuffer);
-        // dstBuffer.flip();
-    }
-
-    protected void decrypt(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer, final HikariCrypto hikariCrypto) throws HikariDecryptException {
-        // dstBuffer.clear();
-        hikariCrypto.decrypt(srcBuffer, dstBuffer);
-        // dstBuffer.flip();
-    }
-
-    protected void wrapPacket(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer) {
+    private void wrapPacket(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer) {
         short length = (short) (srcBuffer.remaining() + 4);
 
         // checksum
@@ -63,7 +142,7 @@ public abstract class HikariAbstractHandle implements HikariHandle {
         // dstBuffer.flip();
     }
 
-    protected boolean unwrapPacket(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer, final PacketContext packetContext) {
+    private boolean unwrapPacket(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer, final PacketContext packetContext) {
         if (srcBuffer.remaining() == 0) {
             return false;
         }

@@ -1,5 +1,6 @@
 package com.github.yukinomiu.hikari.client;
 
+import com.github.yukinomiu.hikari.common.EncryptTransfer;
 import com.github.yukinomiu.hikari.common.HikariStatus;
 import com.github.yukinomiu.hikari.common.PacketContext;
 import org.slf4j.Logger;
@@ -13,7 +14,7 @@ import java.nio.channels.SocketChannel;
  * Yukinomiu
  * 2018/1/24
  */
-public class ClientRemoteContext extends ClientContext {
+public class ClientRemoteContext extends ClientContext implements EncryptTransfer {
     private static final Logger logger = LoggerFactory.getLogger(ClientRemoteContext.class);
 
     private boolean closed = false;
@@ -64,6 +65,7 @@ public class ClientRemoteContext extends ClientContext {
         return localContext;
     }
 
+    @Override
     public PacketContext getPacketContext() {
         return packetContext;
     }

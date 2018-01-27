@@ -12,8 +12,8 @@ public class PacketContext {
     private Short currentPacketLength;
     private boolean buffering;
 
-    public PacketContext(final ByteBuffer packetBuffer) {
-        this.packetBuffer = packetBuffer;
+    PacketContext(final int bufferSize) {
+        this.packetBuffer = ByteBuffer.allocateDirect(bufferSize);
 
         currentPacketLength = null;
         buffering = false;

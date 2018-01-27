@@ -87,7 +87,7 @@ public class Client implements LifeCycle {
 
         @Override
         public void run() {
-            logger.info("client thread run");
+            logger.info("client thread run...");
 
             final ClientHandler clientHandler = new ClientHandler(clientConfig);
             final Selector selector = selectionKey.selector();

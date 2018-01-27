@@ -1,23 +1,27 @@
-### 使用方法
-1. 确保java8已被正确安装；
-2. 下载对应的jar文件和配置文件；
-3. 运行：
+### About
+Hikari, A proxy tool which help you break through network restrictions.
 
-> ```java -jar /path/to/jar_file/xxx.jar /path/to/config_file/xxx.json```
+### Usage
+1. Install Java8, JDK or JRE is all fine;
+2. Download the server or client jar file;
+3. Run command: ```java -jar /path/to/jar_file/xxx.jar /path/to/config_file/xxx.json```;
+4. Enjoy;
 
-### 配置文件说明
-* 服务端配置：
-  * listenAddress：服务端监听端口；
-  * listenPortList：服务端监听端口；
-  * privateKeyList：允许的密码列表；
+### Configuration
+* Server Configuration:
+  * listenAddress: listening address, your server internet address;
+  * listenPortList: related port;
+  * privateKeyList: allowed user keys;
+  * bufferSize: size of data buffer, keep default 2048 please;
 
-* 客户端配置：
-  * listenAddress：客户端监听地址，一般请填写“localhost”或者“127.0.0.1”；
-  * listenPort：客户端监听端口；
-  * localDnsResolve：是否开启本地DNS解析，true：本地DNS解析；false：服务端DNS解析；
-  * serverAddress：服务端地址；
-  * serverPortList：服务端端口列表；
-  * privateKey：密码；
+* Client Configuration:
+  * listenAddress: listen address, often 'localhost' or '127.0.0.1';
+  * listenPort: related port;
+  * localDnsResolve: 'true': using local DNS resolving; 'false': using server DNS resolving;
+  * bufferSize: size of data buffer, keep default 2048 please;
+  * serverAddress: the server listening address, IP address or Hostname;
+  * serverPortList: the server listening port;
+  * privateKey: user key;
 
-### 推荐JVM参数
-> ```-XX:+UseG1GC  -XX:NewRatio=2 -XX:SurvivorRatio=6```
+### Other
+recommend JVM arguments: ```-XX:+UseG1GC -XX:NewRatio=2 -XX:SurvivorRatio=6```

@@ -109,7 +109,7 @@ public class Server implements LifeCycle {
 
         @Override
         public void run() {
-            logger.info("server thread {} run", Thread.currentThread().getId());
+            logger.info("server thread[{}] run...", Thread.currentThread().getId());
 
             final ServerHandler serverHandler = new ServerHandler(serverConfig);
             final Selector selector = selectionKey.selector();

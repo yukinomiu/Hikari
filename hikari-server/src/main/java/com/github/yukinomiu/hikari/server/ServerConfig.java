@@ -1,16 +1,17 @@
 package com.github.yukinomiu.hikari.server;
 
+import com.github.yukinomiu.hikari.common.HikariConfig;
+
 import java.util.List;
 
 /**
  * Yukinomiu
  * 2018/01/22
  */
-public class ServerConfig {
+public class ServerConfig extends HikariConfig {
     private String listenAddress;
     private List<Integer> listenPortList;
     private List<String> privateKeyList;
-    private Integer bufferSize;
 
     public String getListenAddress() {
         return listenAddress;
@@ -34,13 +35,5 @@ public class ServerConfig {
 
     public void setPrivateKeyList(List<String> privateKeyList) {
         this.privateKeyList = privateKeyList;
-    }
-
-    public Integer getBufferSize() {
-        return bufferSize;
-    }
-
-    public void setBufferSize(Integer bufferSize) {
-        this.bufferSize = bufferSize;
     }
 }
