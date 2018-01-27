@@ -1,6 +1,6 @@
 package com.github.yukinomiu.hikari.common;
 
-import com.github.yukinomiu.hikari.common.crypto.AESCrypto;
+import com.github.yukinomiu.hikari.common.crypto.CryptoManager;
 import com.github.yukinomiu.hikari.common.crypto.HikariCrypto;
 import com.github.yukinomiu.hikari.common.exception.HikariChecksumFailException;
 import org.slf4j.Logger;
@@ -35,7 +35,10 @@ public abstract class HikariAbstractHandle implements HikariHandle {
         packetBuffer = ByteBuffer.allocateDirect(bufferSize + HikariConstant.PACKET_WRAPPER_SIZE);
 
         // crypto
-        hikariCrypto = new AESCrypto("secret");
+        final String encryptType = hikariConfig.getEncryptType();
+        final String secret = hikariConfig.getSecret();
+        hikariCrypto = CryptoManager.getCrypto(encryptType, secret);
+        logger.info("using {}", encryptType);
     }
 
     @Override
@@ -85,7 +88,8 @@ public abstract class HikariAbstractHandle implements HikariHandle {
             logger.warn("checksum verifying fail");
             hikariContext.close();
         } catch (Exception e) {
-            logger.warn("handle read exception: {}", e.getMessage(), e);
+            String msg = e.getMessage();
+            logger.warn("handle read exception: {}", msg != null ? msg : e.getClass().getName());
             hikariContext.close();
         }
     }

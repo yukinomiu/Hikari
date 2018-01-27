@@ -3,6 +3,8 @@
   "listenPort": 1180,
   "localDnsResolve": false,
   "bufferSize": 2048,
+  "encryptType": "aes",
+  "secret": "hikari-secret",
   "serverAddress": "localhost",
   "serverPortList": [
     9670,

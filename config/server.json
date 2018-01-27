@@ -7,5 +7,7 @@
   "privateKeyList": [
     "hikari"
   ],
-  "bufferSize": 2048
+  "bufferSize": 2048,
+  "encryptType": "aes",
+  "secret": "hikari-secret"
 }

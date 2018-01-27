@@ -13,15 +13,26 @@ Hikari, A proxy tool which help you break through network restrictions.
   * listenPortList: related port;
   * privateKeyList: allowed user keys;
   * bufferSize: size of data buffer, keep default 2048 please;
+  * encryptType: which encrypt type to use, must be same with server;
+  * secret: the key when encrypting;
 
 * Client Configuration:
   * listenAddress: listen address, often 'localhost' or '127.0.0.1';
   * listenPort: related port;
   * localDnsResolve: 'true': using local DNS resolving; 'false': using server DNS resolving;
   * bufferSize: size of data buffer, keep default 2048 please;
+  * encryptType: which encrypt type to use, must be same with server;
+  * secret: the key when encrypting;
   * serverAddress: the server listening address, IP address or Hostname;
   * serverPortList: the server listening port;
   * privateKey: user key;
+  
+### Encrypt Type
+supported encrypt type currently:
+
+  * aes
+  * rc4
+  * plain(no encrypt)
 
 ### Other
 recommend JVM arguments: ```-XX:+UseG1GC -XX:NewRatio=2 -XX:SurvivorRatio=6```

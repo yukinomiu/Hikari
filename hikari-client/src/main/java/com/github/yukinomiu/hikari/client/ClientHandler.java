@@ -42,12 +42,14 @@ public class ClientHandler extends HikariAbstractHandle {
         // server address
         String serverAddress = clientConfig.getServerAddress();
         List<Integer> serverPortList = clientConfig.getServerPortList();
+        logger.info("server address: {}", serverAddress);
 
         serverAddressArray = new SocketAddress[serverPortList.size()];
         for (int i = 0; i < serverAddressArray.length; i++) {
             final Integer port = serverPortList.get(i);
             SocketAddress address = new InetSocketAddress(serverAddress, port);
             serverAddressArray[i] = address;
+            logger.info("server port: {}", port);
         }
         maxAddressIndex = serverAddressArray.length - 1;
         currentAddressIndex = 0;
@@ -71,7 +73,8 @@ public class ClientHandler extends HikariAbstractHandle {
             ClientLocalContext clientLocalContext = new ClientLocalContext(localKey, SocksStatus.SOCKS_AUTH);
             localKey.attach(clientLocalContext);
         } catch (Exception e) {
-            logger.warn("handle accept exception: {}", e.getMessage(), e);
+            String msg = e.getMessage();
+            logger.warn("handle accept exception: {}", msg != null ? msg : e.getClass().getName());
         }
     }
 
@@ -113,7 +116,8 @@ public class ClientHandler extends HikariAbstractHandle {
             // write
             encryptWrite(dataBuffer, remoteChannel);
         } catch (Exception e) {
-            logger.warn("handle connect exception: {}", e.getMessage(), e);
+            String msg = e.getMessage();
+            logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
             clientRemoteContext.close();
         }
     }

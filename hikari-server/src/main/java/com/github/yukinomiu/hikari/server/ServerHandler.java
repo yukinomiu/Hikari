@@ -66,7 +66,8 @@ public class ServerHandler extends HikariAbstractHandle {
             ServerClientContext serverClientContext = new ServerClientContext(clientKey, packetContext, HikariStatus.HIKARI_AUTH);
             clientKey.attach(serverClientContext);
         } catch (Exception e) {
-            logger.warn("handle accept exception: {}", e.getMessage(), e);
+            String msg = e.getMessage();
+            logger.warn("handle accept exception: {}", msg != null ? msg : e.getClass().getName());
         }
     }
 
@@ -121,7 +122,8 @@ public class ServerHandler extends HikariAbstractHandle {
             // set status
             serverClientContext.setStatus(HikariStatus.HIKARI_PROXY);
         } catch (Exception e) {
-            logger.warn("handle connect exception: {}", e.getMessage(), e);
+            String msg = e.getMessage();
+            logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
             serverTargetContext.close();
         }
     }
