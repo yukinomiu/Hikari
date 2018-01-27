@@ -2,7 +2,6 @@ package com.github.yukinomiu.hikari.common;
 
 import com.github.yukinomiu.hikari.common.exception.HikariException;
 import com.github.yukinomiu.hikari.common.util.JsonUtil;
-import org.apache.commons.lang3.StringUtils;
 
 import java.io.*;
 
@@ -19,7 +18,7 @@ public class ConfigLoader<T> {
     }
 
     public T load(final Class<T> cls) throws HikariException {
-        if (StringUtils.isBlank(configFilePath)) {
+        if (configFilePath == null || configFilePath.length() == 0) {
             throw new HikariException("config file path can not be blank");
         }
 

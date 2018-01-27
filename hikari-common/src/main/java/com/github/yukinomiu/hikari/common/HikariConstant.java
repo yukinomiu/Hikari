@@ -8,5 +8,5 @@ public class HikariConstant {
     private HikariConstant() {
     }
 
-    public static final int BUFFER_SIZE = 2048;
+    public static final int PACKET_WRAPPER_SIZE = 6;
 }

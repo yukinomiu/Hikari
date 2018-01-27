@@ -2,7 +2,11 @@
   "listenAddress": "localhost",
   "listenPort": 1180,
   "localDnsResolve": false,
+  "bufferSize": 2048,
   "serverAddress": "localhost",
-  "serverPortList": [9670, 9671],
+  "serverPortList": [
+    9670,
+    9671
+  ],
   "privateKey": "hikari"
 }

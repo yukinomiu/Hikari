@@ -10,6 +10,7 @@ public class ServerConfig {
     private String listenAddress;
     private List<Integer> listenPortList;
     private List<String> privateKeyList;
+    private Integer bufferSize;
 
     public String getListenAddress() {
         return listenAddress;
@@ -33,5 +34,13 @@ public class ServerConfig {
 
     public void setPrivateKeyList(List<String> privateKeyList) {
         this.privateKeyList = privateKeyList;
+    }
+
+    public Integer getBufferSize() {
+        return bufferSize;
+    }
+
+    public void setBufferSize(Integer bufferSize) {
+        this.bufferSize = bufferSize;
     }
 }

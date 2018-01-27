@@ -10,6 +10,7 @@ public class ClientConfig {
     private String listenAddress;
     private Integer listenPort;
     private Boolean localDnsResolve;
+    private Integer bufferSize;
 
     private String serverAddress;
     private List<Integer> serverPortList;
@@ -37,6 +38,14 @@ public class ClientConfig {
 
     public void setLocalDnsResolve(Boolean localDnsResolve) {
         this.localDnsResolve = localDnsResolve;
+    }
+
+    public Integer getBufferSize() {
+        return bufferSize;
+    }
+
+    public void setBufferSize(Integer bufferSize) {
+        this.bufferSize = bufferSize;
     }
 
     public String getServerAddress() {

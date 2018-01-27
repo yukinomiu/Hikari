@@ -44,10 +44,6 @@ public class JsonUtil {
     }
 
     public static String serialize(Object object) throws JsonProcessingException {
-        if (object == null) {
-            throw new NullPointerException();
-        }
-
         return mapper.writeValueAsString(object);
     }
 
