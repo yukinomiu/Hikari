@@ -48,7 +48,7 @@ public class ServerHandler extends HikariAbstractHandle {
         // buffer
         bufferSize = config.getBufferSize();
         dataBuffer = ByteBuffer.allocateDirect(bufferSize);
-        cacheBuffer = ByteBuffer.allocateDirect(bufferSize);
+        cacheBuffer = ByteBuffer.allocateDirect(bufferSize << 1);
         cryptoBuffer = ByteBuffer.allocateDirect(bufferSize);
         packetBuffer = ByteBuffer.allocateDirect(bufferSize + HikariConstant.PACKET_WRAPPER_SIZE);
 
