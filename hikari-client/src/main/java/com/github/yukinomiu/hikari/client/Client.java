@@ -89,7 +89,7 @@ public class Client implements LifeCycle {
         public void run() {
             logger.info("client thread run...");
 
-            final ClientHandler clientHandler = new ClientHandler(clientConfig);
+            final ClientHandler handler = new ClientHandler(clientConfig);
             final Selector selector = selectionKey.selector();
 
             // loop
@@ -118,13 +118,16 @@ public class Client implements LifeCycle {
                         }
 
                         if (key.isReadable()) {
-                            clientHandler.handleRead(key);
+                            handler.handleRead(key);
+                        }
+                        else if (key.isWritable()) {
+                            handler.handleWrite(key);
                         }
                         else if (key.isAcceptable()) {
-                            clientHandler.handleAccept(key);
+                            handler.handleAccept(key);
                         }
                         else if (key.isConnectable()) {
-                            clientHandler.handleConnect(key);
+                            handler.handleConnect(key);
                         }
                     }
                 } catch (Exception e) {

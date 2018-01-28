@@ -5,6 +5,7 @@ package com.github.yukinomiu.hikari.common;
  * 2018/1/27
  */
 public class HikariConfig {
+
     private Integer bufferSize;
     private String encryptType;
     private String secret;

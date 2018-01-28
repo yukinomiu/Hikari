@@ -14,10 +14,7 @@ import java.nio.channels.SocketChannel;
  */
 public class ClientLocalContext extends ClientContext {
     private static final Logger logger = LoggerFactory.getLogger(ClientLocalContext.class);
-
     private boolean closed = false;
-
-    private final SelectionKey selectionKey;
 
     private SocksStatus status;
     private ClientRemoteContext remoteContext;
@@ -26,10 +23,10 @@ public class ClientLocalContext extends ClientContext {
     private byte[] address;
     private byte[] port;
 
-    public ClientLocalContext(final SelectionKey selectionKey, final SocksStatus status) {
-        super(ClientContextType.LOCAL);
-
-        this.selectionKey = selectionKey;
+    public ClientLocalContext(final SelectionKey key,
+                              final Integer bufferSize,
+                              final SocksStatus status) {
+        super(ClientContextType.LOCAL, key, bufferSize);
         this.status = status;
     }
 
@@ -40,11 +37,12 @@ public class ClientLocalContext extends ClientContext {
         }
         closed = true;
 
-        if (selectionKey != null) {
-            selectionKey.cancel();
+        final SelectionKey key = key();
+        if (key != null) {
+            key.cancel();
 
             try {
-                SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
+                SocketChannel socketChannel = (SocketChannel) key.channel();
                 socketChannel.close();
             } catch (IOException e) {
                 logger.warn("close local socket channel exception, msg: {}", e.getMessage());
@@ -54,10 +52,6 @@ public class ClientLocalContext extends ClientContext {
         if (remoteContext != null) {
             remoteContext.close();
         }
-    }
-
-    public SelectionKey getSelectionKey() {
-        return selectionKey;
     }
 
     public SocksStatus getStatus() {

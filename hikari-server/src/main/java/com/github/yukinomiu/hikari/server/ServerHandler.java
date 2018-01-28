@@ -1,7 +1,7 @@
 package com.github.yukinomiu.hikari.server;
 
 import com.github.yukinomiu.hikari.common.HikariAbstractHandle;
-import com.github.yukinomiu.hikari.common.HikariContext;
+import com.github.yukinomiu.hikari.common.HikariConstant;
 import com.github.yukinomiu.hikari.common.HikariStatus;
 import com.github.yukinomiu.hikari.common.PacketContext;
 import com.github.yukinomiu.hikari.common.exception.HikariRuntimeException;
@@ -29,19 +29,31 @@ import java.util.Set;
  */
 public class ServerHandler extends HikariAbstractHandle {
     private static final Logger logger = LoggerFactory.getLogger(ServerHandler.class);
+    private final ServerConfig config;
 
-    private final ServerConfig serverConfig;
+    private final Integer bufferSize;
+    private final ByteBuffer dataBuffer;
+    private final ByteBuffer cacheBuffer;
+    private final ByteBuffer cryptoBuffer;
+    private final ByteBuffer packetBuffer;
 
     private final Set<String> privateKeyHashSet;
 
-    public ServerHandler(final ServerConfig serverConfig) {
-        super(serverConfig);
+    public ServerHandler(final ServerConfig config) {
+        super(config);
 
         // config
-        this.serverConfig = serverConfig;
+        this.config = config;
+
+        // buffer
+        bufferSize = config.getBufferSize();
+        dataBuffer = ByteBuffer.allocateDirect(bufferSize);
+        cacheBuffer = ByteBuffer.allocateDirect(bufferSize);
+        cryptoBuffer = ByteBuffer.allocateDirect(bufferSize);
+        packetBuffer = ByteBuffer.allocateDirect(bufferSize + HikariConstant.PACKET_WRAPPER_SIZE);
 
         // private keys
-        List<String> privateKeyList = serverConfig.getPrivateKeyList();
+        List<String> privateKeyList = config.getPrivateKeyList();
         privateKeyHashSet = new HashSet<>(privateKeyList.size(), 1);
 
         Md5Util md5Util = Md5Util.getInstance();
@@ -52,19 +64,18 @@ public class ServerHandler extends HikariAbstractHandle {
     }
 
     @Override
-    public void handleAccept(final SelectionKey selectionKey) {
-        final Selector selector = selectionKey.selector();
-        final ServerSocketChannel serverSocketChannel = (ServerSocketChannel) selectionKey.channel();
+    public void handleAccept(final SelectionKey key) {
+        final Selector selector = key.selector();
+        final ServerSocketChannel serverChannel = (ServerSocketChannel) key.channel();
 
         try {
-            SocketChannel socketChannel = serverSocketChannel.accept();
-            socketChannel.configureBlocking(false);
+            SocketChannel channel = serverChannel.accept();
+            channel.configureBlocking(false);
 
-            SelectionKey clientKey = socketChannel.register(selector, SelectionKey.OP_READ);
+            SelectionKey clientKey = channel.register(selector, SelectionKey.OP_READ);
 
-            PacketContext packetContext = getNewPacketContext();
-            ServerClientContext serverClientContext = new ServerClientContext(clientKey, packetContext, HikariStatus.HIKARI_AUTH);
-            clientKey.attach(serverClientContext);
+            ServerClientContext clientContext = new ServerClientContext(clientKey, bufferSize, HikariStatus.HIKARI_AUTH);
+            clientKey.attach(clientContext);
         } catch (Exception e) {
             String msg = e.getMessage();
             logger.warn("handle accept exception: {}", msg != null ? msg : e.getClass().getName());
@@ -72,23 +83,23 @@ public class ServerHandler extends HikariAbstractHandle {
     }
 
     @Override
-    public void handleConnect(final SelectionKey selectionKey) {
-        final ServerTargetContext serverTargetContext = (ServerTargetContext) selectionKey.attachment();
-        final ServerClientContext serverClientContext = serverTargetContext.getClientContext();
+    public void handleConnect(final SelectionKey key) {
+        final ServerTargetContext targetContext = (ServerTargetContext) key.attachment();
+        final SocketChannel targetChannel = (SocketChannel) key.channel();
 
-        final SocketChannel targetChannel = (SocketChannel) selectionKey.channel();
-        final SocketChannel clientChannel = (SocketChannel) serverClientContext.getSelectionKey().channel();
+        final ServerClientContext clientContext = targetContext.getClientContext();
+        final SocketChannel clientChannel = (SocketChannel) clientContext.key().channel();
 
         try {
             try {
                 targetChannel.finishConnect();
             } catch (IOException e) {
                 logger.warn("connect to target fail, msg: {}", e.getMessage());
-                writeHikariFail(HikariProtocol.AUTH_RESPONSE_CONNECT_TARGET_FAIL, clientChannel, serverTargetContext);
+                writeHikariFail(HikariProtocol.AUTH_RESPONSE_CONNECT_TARGET_FAIL, clientChannel, targetContext);
                 return;
             }
 
-            selectionKey.interestOps(SelectionKey.OP_READ);
+            key.interestOps(SelectionKey.OP_READ);
 
             // response
             final Socket targetSocket = targetChannel.socket();
@@ -116,86 +127,154 @@ public class ServerHandler extends HikariAbstractHandle {
             dataBuffer.putShort(port);
             dataBuffer.flip();
 
+            // encrypt
+            encrypt(dataBuffer, cryptoBuffer, packetBuffer);
+
             // write
-            encryptWrite(dataBuffer, clientChannel);
+            clientChannel.write(packetBuffer);
+            if (packetBuffer.hasRemaining()) {
+                logger.warn("send hikari auth response fail");
+                targetContext.close();
+                return;
+            }
 
             // set status
-            serverClientContext.setStatus(HikariStatus.HIKARI_PROXY);
+            clientContext.setStatus(HikariStatus.HIKARI_PROXY);
         } catch (Exception e) {
             String msg = e.getMessage();
             logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
-            serverTargetContext.close();
+            targetContext.close();
         }
     }
 
     @Override
-    public void consumeData(final SelectionKey selectionKey,
-                            final SocketChannel socketChannel,
-                            final ByteBuffer data,
-                            final HikariContext hikariContext) throws Exception {
-        final ServerContext serverContext = (ServerContext) hikariContext;
-        final ServerContextType type = serverContext.getType();
+    public void handleRead(final SelectionKey key) {
+        final ServerContext context = (ServerContext) key.attachment();
+        final ServerContextType type = context.getType();
 
-        if (type == ServerContextType.CLIENT) {
-            final ServerClientContext serverClientContext = (ServerClientContext) serverContext;
-            final HikariStatus status = serverClientContext.getStatus();
+        try {
+            if (type == ServerContextType.CLIENT) {
+                final ServerClientContext clientContext = (ServerClientContext) context;
+                final HikariStatus status = clientContext.getStatus();
 
-            switch (status) {
-                case HIKARI_AUTH:
-                    processHikariAuthRead(socketChannel, data, serverClientContext);
-                    break;
+                switch (status) {
+                    case HIKARI_AUTH:
+                        processHikariAuthRead(key, clientContext);
+                        break;
 
-                case HIKARI_PROXY:
-                    processHikariProxyRead(socketChannel, data, serverClientContext);
-                    break;
+                    case HIKARI_PROXY:
+                        processHikariProxyRead(key, clientContext);
+                        break;
 
-                default:
-                    throw new HikariRuntimeException(String.format("server status '%s' not supported", status.name()));
+                    default:
+                        throw new HikariRuntimeException(String.format("server hikari status '%s' not supported", status.name()));
+                }
             }
-        }
-        else if (type == ServerContextType.TARGET) {
-            final ServerTargetContext serverTargetContext = (ServerTargetContext) serverContext;
+            else if (type == ServerContextType.TARGET) {
+                final ServerTargetContext serverTargetContext = (ServerTargetContext) context;
 
-            processTargetRead(socketChannel, data, serverTargetContext);
-        }
-        else {
-            throw new HikariRuntimeException(String.format("server context type '%s' not supported", type.name()));
+                processTargetRead(key, serverTargetContext);
+            }
+            else {
+                throw new HikariRuntimeException(String.format("server context type '%s' not supported", type.name()));
+            }
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            logger.warn("handle read exception: {}", msg != null ? msg : e.getClass().getName());
+            context.close();
         }
     }
 
-    private void processHikariAuthRead(final SocketChannel socketChannel, final ByteBuffer data, final ServerClientContext serverClientContext) throws IOException {
+    @Override
+    public void handleWrite(final SelectionKey key) {
+        final ServerContext context = (ServerContext) key.attachment();
+        final ServerContextType type = context.getType();
+
+        try {
+            if (type == ServerContextType.CLIENT) {
+                final ServerClientContext clientContext = (ServerClientContext) context;
+                final SocketChannel clientChannel = (SocketChannel) key.channel();
+                final ByteBuffer writeBuffer = clientContext.writeBuffer();
+
+                clientChannel.write(writeBuffer);
+                if (!writeBuffer.hasRemaining()) {
+                    final SelectionKey targetKey = clientContext.getTargetContext().key();
+
+                    key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
+                    targetKey.interestOps(targetKey.interestOps() | SelectionKey.OP_READ);
+                }
+            }
+            else if (type == ServerContextType.TARGET) {
+                final ServerTargetContext targetContext = (ServerTargetContext) context;
+                final SocketChannel targetChannel = (SocketChannel) key.channel();
+                final ByteBuffer writeBuffer = targetContext.writeBuffer();
+
+                targetChannel.write(writeBuffer);
+                if (!writeBuffer.hasRemaining()) {
+                    final SelectionKey clientKey = targetContext.getClientContext().key();
+
+                    key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
+                    clientKey.interestOps(clientKey.interestOps() | SelectionKey.OP_READ);
+                }
+            }
+            else {
+                throw new HikariRuntimeException(String.format("server context type '%s' not supported", type.name()));
+            }
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            logger.warn("handle write exception: {}", msg != null ? msg : e.getClass().getName());
+            context.close();
+        }
+    }
+
+    private void processHikariAuthRead(final SelectionKey key,
+                                       final ServerClientContext clientContext) throws IOException {
+        final SocketChannel clientChannel = (SocketChannel) key.channel();
+        if (!read(clientChannel, packetBuffer, clientContext)) {
+            return;
+        }
+
+        final PacketContext packetContext = clientContext.getPacketContext();
+
+        // decrypt
+        cacheBuffer.clear();
+        while (decrypt(packetBuffer, cryptoBuffer, dataBuffer, packetContext)) {
+            cacheBuffer.put(dataBuffer);
+        }
+        cacheBuffer.flip();
+
         // ver
-        final byte ver = data.get();
+        final byte ver = cacheBuffer.get();
         if (ver != HikariProtocol.VERSION_HIKARI1) {
-            writeHikariFail(HikariProtocol.AUTH_RESPONSE_VERSION_NOT_SUPPORT, socketChannel, serverClientContext);
+            writeHikariFail(HikariProtocol.AUTH_RESPONSE_VERSION_NOT_SUPPORT, clientChannel, clientContext);
             return;
         }
 
         // auth
         final byte[] auth = new byte[16];
-        data.get(auth);
+        cacheBuffer.get(auth);
         String keyHashHex = HexUtil.hexString(auth);
         if (!privateKeyHashSet.contains(keyHashHex)) {
-            writeHikariFail(HikariProtocol.AUTH_RESPONSE_AUTH_FAIL, socketChannel, serverClientContext);
+            writeHikariFail(HikariProtocol.AUTH_RESPONSE_AUTH_FAIL, clientChannel, clientContext);
             return;
         }
 
         // address
-        final byte hikariAddressType = data.get();
+        final byte hikariAddressType = cacheBuffer.get();
         final byte[] address;
         if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_DOMAIN) {
             // resolve
-            int length = data.get();
+            int length = cacheBuffer.get();
             byte[] tmpArray = new byte[length];
-            data.get(tmpArray, 0, length);
+            cacheBuffer.get(tmpArray, 0, length);
 
             String domainName = new String(tmpArray, StandardCharsets.US_ASCII);
             InetAddress inetAddress;
             try {
                 inetAddress = InetAddress.getByName(domainName);
             } catch (UnknownHostException e) {
-                logger.error("DNS resolve fail: {}", domainName);
-                writeHikariFail(HikariProtocol.AUTH_RESPONSE_DNS_RESOLVE_FAIL, socketChannel, serverClientContext);
+                logger.warn("DNS resolve fail: {}", domainName);
+                writeHikariFail(HikariProtocol.AUTH_RESPONSE_DNS_RESOLVE_FAIL, clientChannel, clientContext);
                 return;
             }
 
@@ -203,23 +282,29 @@ public class ServerHandler extends HikariAbstractHandle {
         }
         else if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_IPV4) {
             address = new byte[4];
-            data.get(address, 0, 4);
+            cacheBuffer.get(address, 0, 4);
         }
         else if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_IPV6) {
             address = new byte[16];
-            data.get(address, 0, 16);
+            cacheBuffer.get(address, 0, 16);
         }
         else {
             throw new HikariRuntimeException(String.format("hikari address type '%s' not supported", hikariAddressType));
         }
 
         // port
-        final short port = data.getShort();
+        final short port = cacheBuffer.getShort();
+
+        if (cacheBuffer.hasRemaining()) {
+            logger.warn("bad hikari auth request");
+            clientContext.close();
+            return;
+        }
 
         // connect to target
         InetAddress inetAddress = InetAddress.getByAddress(address);
 
-        final SelectionKey clientKey = serverClientContext.getSelectionKey();
+        final SelectionKey clientKey = clientContext.key();
         final Selector selector = clientKey.selector();
         final SocketAddress targetAddress = new InetSocketAddress(inetAddress, port);
 
@@ -227,10 +312,10 @@ public class ServerHandler extends HikariAbstractHandle {
         targetChannel.configureBlocking(false);
 
         final SelectionKey targetKey = targetChannel.register(selector, SelectionKey.OP_CONNECT);
-        ServerTargetContext targetContext = new ServerTargetContext(targetKey, serverClientContext);
+        ServerTargetContext targetContext = new ServerTargetContext(targetKey, bufferSize, clientContext);
         targetKey.attach(targetContext);
 
-        serverClientContext.setTargetContext(targetContext);
+        clientContext.setTargetContext(targetContext);
 
         boolean connectedNow = targetChannel.connect(targetAddress);
         if (connectedNow) {
@@ -238,23 +323,60 @@ public class ServerHandler extends HikariAbstractHandle {
         }
     }
 
-    private void processHikariProxyRead(final SocketChannel socketChannel, final ByteBuffer data, final ServerClientContext serverClientContext) throws IOException {
-        final SocketChannel targetChannel = (SocketChannel) serverClientContext.getTargetContext().getSelectionKey().channel();
-        targetChannel.write(data);
+    private void processHikariProxyRead(final SelectionKey key,
+                                        final ServerClientContext clientContext) throws IOException {
+        final SocketChannel clientChannel = (SocketChannel) key.channel();
+
+        if (!read(clientChannel, packetBuffer, clientContext)) {
+            return;
+        }
+
+        // decrypt
+        final PacketContext packetContext = clientContext.getPacketContext();
+        final ServerTargetContext targetContext = clientContext.getTargetContext();
+
+        cacheBuffer.clear();
+        while (decrypt(packetBuffer, cryptoBuffer, dataBuffer, packetContext)) {
+            cacheBuffer.put(dataBuffer);
+        }
+        cacheBuffer.flip();
+
+        // write
+        write(clientContext, targetContext, cacheBuffer);
     }
 
-    private void processTargetRead(final SocketChannel socketChannel, final ByteBuffer data, final ServerTargetContext serverTargetContext) throws IOException {
-        final SocketChannel clientChannel = (SocketChannel) serverTargetContext.getClientContext().getSelectionKey().channel();
-        encryptWrite(data, clientChannel);
+    private void processTargetRead(final SelectionKey key,
+                                   final ServerTargetContext targetContext) throws IOException {
+        final SocketChannel targetChannel = (SocketChannel) key.channel();
+        if (!read(targetChannel, dataBuffer, targetContext)) {
+            return;
+        }
+
+        // encrypt
+        encrypt(dataBuffer, cryptoBuffer, packetBuffer);
+
+        // write
+        final ServerClientContext clientContext = targetContext.getClientContext();
+        write(targetContext, clientContext, packetBuffer);
     }
 
-    private void writeHikariFail(final byte response, final SocketChannel socketChannel, final ServerContext serverContext) throws IOException {
+    private void writeHikariFail(final byte rsp,
+                                 final SocketChannel channel,
+                                 final ServerContext context) throws IOException {
         dataBuffer.clear();
         dataBuffer.put(HikariProtocol.VERSION_HIKARI1);
-        dataBuffer.put(response);
+        dataBuffer.put(rsp);
         dataBuffer.flip();
 
-        encryptWrite(dataBuffer, socketChannel);
-        serverContext.close();
+        // encrypt
+        encrypt(dataBuffer, cryptoBuffer, packetBuffer);
+
+        // write
+        channel.write(packetBuffer);
+        if (packetBuffer.hasRemaining()) {
+            logger.warn("send hikari auth response fail");
+        }
+
+        context.close();
     }
 }

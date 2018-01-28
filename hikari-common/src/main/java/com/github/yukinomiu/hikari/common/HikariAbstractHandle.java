@@ -18,22 +18,11 @@ import java.util.zip.CRC32;
  */
 public abstract class HikariAbstractHandle implements HikariHandle {
     private static final Logger logger = LoggerFactory.getLogger(HikariAbstractHandle.class);
-
     private final CRC32 crc32 = new CRC32();
-
-    protected final ByteBuffer dataBuffer;
-    private final ByteBuffer cryptoBuffer;
-    private final ByteBuffer packetBuffer;
 
     private final HikariCrypto hikariCrypto;
 
     protected HikariAbstractHandle(final HikariConfig hikariConfig) {
-        // buffer
-        final Integer bufferSize = hikariConfig.getBufferSize();
-        dataBuffer = ByteBuffer.allocateDirect(bufferSize);
-        cryptoBuffer = ByteBuffer.allocateDirect(bufferSize);
-        packetBuffer = ByteBuffer.allocateDirect(bufferSize + HikariConstant.PACKET_WRAPPER_SIZE);
-
         // crypto
         final String encryptType = hikariConfig.getEncryptType();
         final String secret = hikariConfig.getSecret();
@@ -41,81 +30,8 @@ public abstract class HikariAbstractHandle implements HikariHandle {
         logger.info("using {}", encryptType);
     }
 
-    @Override
-    public final void handleRead(final SelectionKey selectionKey) {
-        final SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
-        final HikariContext hikariContext = (HikariContext) selectionKey.attachment();
-
-        try {
-            if (hikariContext instanceof EncryptTransfer) {
-                final EncryptTransfer encryptTransfer = (EncryptTransfer) hikariContext;
-
-                // read
-                packetBuffer.clear();
-                if (!read(socketChannel, packetBuffer, hikariContext)) {
-                    return;
-                }
-                packetBuffer.flip();
-
-                // unwrap packet and decrypt
-                final PacketContext packetContext = encryptTransfer.getPacketContext();
-
-                cryptoBuffer.clear();
-                while (unwrapPacket(packetBuffer, cryptoBuffer, packetContext)) {
-                    cryptoBuffer.flip();
-
-                    // decrypt
-                    dataBuffer.clear();
-                    hikariCrypto.decrypt(cryptoBuffer, dataBuffer);
-                    dataBuffer.flip();
-
-                    consumeData(selectionKey, socketChannel, dataBuffer, hikariContext);
-                    cryptoBuffer.clear();
-                }
-            }
-            else {
-                // read
-                dataBuffer.clear();
-                if (!read(socketChannel, dataBuffer, hikariContext)) {
-                    return;
-                }
-                dataBuffer.flip();
-
-                // handle plain
-                consumeData(selectionKey, socketChannel, dataBuffer, hikariContext);
-            }
-        } catch (HikariChecksumFailException e) {
-            logger.warn("checksum verifying fail");
-            hikariContext.close();
-        } catch (Exception e) {
-            String msg = e.getMessage();
-            logger.warn("handle read exception: {}", msg != null ? msg : e.getClass().getName());
-            hikariContext.close();
-        }
-    }
-
-    protected abstract void consumeData(final SelectionKey selectionKey, final SocketChannel socketChannel, final ByteBuffer data, final HikariContext hikariContext) throws Exception;
-
-    protected final void encryptWrite(final ByteBuffer dataBuffer, final SocketChannel targetChannel) throws IOException {
-        // encrypt
-        cryptoBuffer.clear();
-        hikariCrypto.encrypt(dataBuffer, cryptoBuffer);
-        cryptoBuffer.flip();
-
-        // warp
-        packetBuffer.clear();
-        wrapPacket(cryptoBuffer, packetBuffer);
-        packetBuffer.flip();
-
-        // write
-        targetChannel.write(packetBuffer);
-    }
-
-    protected final PacketContext getNewPacketContext() {
-        return new PacketContext(packetBuffer.capacity());
-    }
-
-    private boolean read(final SocketChannel srcChannel, final ByteBuffer dstBuffer, final HikariContext context) throws IOException {
+    protected final boolean read(final SocketChannel srcChannel, final ByteBuffer dstBuffer, final HikariContext context) throws IOException {
+        dstBuffer.clear();
         int read = srcChannel.read(dstBuffer);
 
         if (read == -1) {
@@ -126,27 +42,42 @@ public abstract class HikariAbstractHandle implements HikariHandle {
             return false;
         }
 
+        dstBuffer.flip();
         return true;
     }
 
-    private void wrapPacket(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer) {
-        short length = (short) (srcBuffer.remaining() + 4);
+    protected final void write(final HikariContext srcContext, final HikariContext dstContext, final ByteBuffer srcBuffer) throws IOException {
+        final SelectionKey dstKey = dstContext.key();
+        final SocketChannel dstChannel = (SocketChannel) dstKey.channel();
 
-        // checksum
-        final int backupPosition = srcBuffer.position();
-        crc32.reset();
-        crc32.update(srcBuffer);
-        final int checksum = (int) crc32.getValue();
-        srcBuffer.position(backupPosition);
+        dstChannel.write(srcBuffer);
+        if (srcBuffer.hasRemaining()) {
+            // under buffer full
+            final SelectionKey srcKey = srcContext.key();
+            final ByteBuffer writeBuffer = dstContext.writeBuffer();
 
-        // dstBuffer.clear();
-        dstBuffer.putShort(length);
-        dstBuffer.putInt(checksum);
-        dstBuffer.put(srcBuffer);
-        // dstBuffer.flip();
+            srcKey.interestOps(srcKey.interestOps() & ~SelectionKey.OP_READ);
+            dstKey.interestOps(dstKey.interestOps() | SelectionKey.OP_WRITE);
+
+            writeBuffer.clear();
+            writeBuffer.put(srcBuffer);
+            writeBuffer.flip();
+        }
     }
 
-    private boolean unwrapPacket(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer, final PacketContext packetContext) {
+    protected final void encrypt(final ByteBuffer srcBuffer, final ByteBuffer encBuffer, final ByteBuffer dstBuffer) {
+        // encrypt
+        encBuffer.clear();
+        hikariCrypto.encrypt(srcBuffer, encBuffer);
+        encBuffer.flip();
+
+        // warp
+        dstBuffer.clear();
+        wrapPacket(encBuffer, dstBuffer);
+        dstBuffer.flip();
+    }
+
+    protected final boolean decrypt(final ByteBuffer srcBuffer, final ByteBuffer encBuffer, final ByteBuffer dstBuffer, final PacketContext packetContext) {
         if (srcBuffer.remaining() == 0) {
             return false;
         }
@@ -164,7 +95,7 @@ public abstract class HikariAbstractHandle implements HikariHandle {
 
                 packetBuffer.clear();
                 packetContext.setCurrentPacketLength(length);
-                return unwrapPacket(srcBuffer, dstBuffer, packetContext);
+                return decrypt(srcBuffer, encBuffer, dstBuffer, packetContext);
             }
             else {
                 // length known
@@ -179,14 +110,34 @@ public abstract class HikariAbstractHandle implements HikariHandle {
                 }
                 else if (currentRemaining == leftLength) {
                     // just full packet
-                    packetBuffer.put(srcBuffer);
-                    packetBuffer.flip();
-                    final int checksum = packetBuffer.getInt();
-                    verifyChecksum(checksum, packetBuffer);
+                    final int checksum;
+                    if (packetBuffer.position() < 4) {
+                        while (packetBuffer.position() != 4) {
+                            packetBuffer.put(srcBuffer.get());
+                        }
 
-                    // dstBuffer.clear();
-                    dstBuffer.put(packetBuffer);
-                    // dstBuffer.flip();
+                        packetBuffer.flip();
+                        checksum = packetBuffer.getInt();
+
+                        encBuffer.clear();
+                        encBuffer.put(srcBuffer);
+                        encBuffer.flip();
+                    }
+                    else {
+                        packetBuffer.flip();
+                        checksum = packetBuffer.getInt();
+
+                        encBuffer.clear();
+                        encBuffer.put(packetBuffer);
+                        encBuffer.put(srcBuffer);
+                        encBuffer.flip();
+                    }
+
+                    verifyChecksum(checksum, encBuffer);
+
+                    dstBuffer.clear();
+                    hikariCrypto.decrypt(encBuffer, dstBuffer);
+                    dstBuffer.flip();
 
                     packetContext.clear();
                     return true;
@@ -196,16 +147,38 @@ public abstract class HikariAbstractHandle implements HikariHandle {
                     final int backupLimit = srcBuffer.limit();
                     srcBuffer.limit(srcBuffer.position() + leftLength);
 
-                    packetBuffer.put(srcBuffer);
-                    packetBuffer.flip();
-                    final int checksum = packetBuffer.getInt();
-                    verifyChecksum(checksum, packetBuffer);
+                    final int checksum;
+                    if (packetBuffer.position() < 4) {
+                        while (packetBuffer.position() != 4) {
+                            packetBuffer.put(srcBuffer.get());
+                        }
 
-                    srcBuffer.limit(backupLimit);
+                        packetBuffer.flip();
+                        checksum = packetBuffer.getInt();
 
-                    // dstBuffer.clear();
-                    dstBuffer.put(packetBuffer);
-                    // dstBuffer.flip();
+                        encBuffer.clear();
+                        encBuffer.put(srcBuffer);
+                        encBuffer.flip();
+
+                        srcBuffer.limit(backupLimit);
+                    }
+                    else {
+                        packetBuffer.flip();
+                        checksum = packetBuffer.getInt();
+
+                        encBuffer.clear();
+                        encBuffer.put(packetBuffer);
+                        encBuffer.put(srcBuffer);
+                        encBuffer.flip();
+
+                        srcBuffer.limit(backupLimit);
+                    }
+
+                    verifyChecksum(checksum, encBuffer);
+
+                    dstBuffer.clear();
+                    hikariCrypto.decrypt(encBuffer, dstBuffer);
+                    dstBuffer.flip();
 
                     packetContext.clear();
                     return true;
@@ -241,9 +214,13 @@ public abstract class HikariAbstractHandle implements HikariHandle {
                     final int checksum = srcBuffer.getInt();
                     verifyChecksum(checksum, srcBuffer);
 
-                    //dstBuffer.clear();
-                    dstBuffer.put(srcBuffer);
-                    // dstBuffer.flip();
+                    encBuffer.clear();
+                    encBuffer.put(srcBuffer);
+                    encBuffer.flip();
+
+                    dstBuffer.clear();
+                    hikariCrypto.decrypt(encBuffer, dstBuffer);
+                    dstBuffer.flip();
 
                     return true;
                 }
@@ -255,16 +232,35 @@ public abstract class HikariAbstractHandle implements HikariHandle {
                     final int checksum = srcBuffer.getInt();
                     verifyChecksum(checksum, srcBuffer);
 
-                    // dstBuffer.clear();
-                    dstBuffer.put(srcBuffer);
-                    // dstBuffer.flip();
+                    encBuffer.clear();
+                    encBuffer.put(srcBuffer);
+                    encBuffer.flip();
 
                     srcBuffer.limit(backupLimit);
+
+                    dstBuffer.clear();
+                    hikariCrypto.decrypt(encBuffer, dstBuffer);
+                    dstBuffer.flip();
 
                     return true;
                 }
             }
         }
+    }
+
+    private void wrapPacket(final ByteBuffer srcBuffer, final ByteBuffer dstBuffer) {
+        short length = (short) (srcBuffer.remaining() + 4);
+
+        // checksum
+        final int backupPosition = srcBuffer.position();
+        crc32.reset();
+        crc32.update(srcBuffer);
+        final int checksum = (int) crc32.getValue();
+        srcBuffer.position(backupPosition);
+
+        dstBuffer.putShort(length);
+        dstBuffer.putInt(checksum);
+        dstBuffer.put(srcBuffer);
     }
 
     private void verifyChecksum(final int expectedChecksum, final ByteBuffer buffer) {
@@ -274,10 +270,10 @@ public abstract class HikariAbstractHandle implements HikariHandle {
         crc32.update(buffer);
         final int realChecksum = (int) crc32.getValue();
 
-        buffer.position(positionBackup);
-
         if (expectedChecksum != realChecksum) {
             throw new HikariChecksumFailException("checksum fail");
         }
+
+        buffer.position(positionBackup);
     }
 }

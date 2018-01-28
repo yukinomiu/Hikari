@@ -1,6 +1,5 @@
 package com.github.yukinomiu.hikari.server;
 
-import com.github.yukinomiu.hikari.common.EncryptTransfer;
 import com.github.yukinomiu.hikari.common.HikariStatus;
 import com.github.yukinomiu.hikari.common.PacketContext;
 import org.slf4j.Logger;
@@ -14,22 +13,19 @@ import java.nio.channels.SocketChannel;
  * Yukinomiu
  * 2018/1/24
  */
-public class ServerClientContext extends ServerContext implements EncryptTransfer {
+public class ServerClientContext extends ServerContext {
     private static final Logger logger = LoggerFactory.getLogger(ServerClientContext.class);
-
     private boolean closed = false;
-
-    private final SelectionKey selectionKey;
     private final PacketContext packetContext;
 
     private HikariStatus status;
     private ServerTargetContext targetContext;
 
-    public ServerClientContext(final SelectionKey selectionKey, final PacketContext packetContext, final HikariStatus status) {
-        super(ServerContextType.CLIENT);
-
-        this.selectionKey = selectionKey;
-        this.packetContext = packetContext;
+    public ServerClientContext(final SelectionKey key,
+                               final Integer bufferSize,
+                               final HikariStatus status) {
+        super(ServerContextType.CLIENT, key, bufferSize);
+        packetContext = new PacketContext(bufferSize);
         this.status = status;
     }
 
@@ -40,12 +36,13 @@ public class ServerClientContext extends ServerContext implements EncryptTransfe
         }
         closed = true;
 
-        if (selectionKey != null) {
-            selectionKey.cancel();
+        final SelectionKey key = key();
+        if (key != null) {
+            key.cancel();
 
             try {
-                SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
-                socketChannel.close();
+                SocketChannel channel = (SocketChannel) key.channel();
+                channel.close();
             } catch (IOException e) {
                 logger.warn("close client socket channel exception, msg: {}", e.getMessage());
             }
@@ -56,11 +53,6 @@ public class ServerClientContext extends ServerContext implements EncryptTransfe
         }
     }
 
-    public SelectionKey getSelectionKey() {
-        return selectionKey;
-    }
-
-    @Override
     public PacketContext getPacketContext() {
         return packetContext;
     }

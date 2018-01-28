@@ -111,7 +111,7 @@ public class Server implements LifeCycle {
         public void run() {
             logger.info("server thread<{}> run...", Thread.currentThread().getName());
 
-            final ServerHandler serverHandler = new ServerHandler(serverConfig);
+            final ServerHandler handler = new ServerHandler(serverConfig);
             final Selector selector = selectionKey.selector();
 
             // loop
@@ -140,13 +140,16 @@ public class Server implements LifeCycle {
                         }
 
                         if (key.isReadable()) {
-                            serverHandler.handleRead(key);
+                            handler.handleRead(key);
+                        }
+                        else if (key.isWritable()) {
+                            handler.handleWrite(key);
                         }
                         else if (key.isAcceptable()) {
-                            serverHandler.handleAccept(key);
+                            handler.handleAccept(key);
                         }
                         else if (key.isConnectable()) {
-                            serverHandler.handleConnect(key);
+                            handler.handleConnect(key);
                         }
                     }
                 } catch (Exception e) {

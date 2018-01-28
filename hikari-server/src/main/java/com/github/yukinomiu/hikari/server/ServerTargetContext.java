@@ -13,16 +13,14 @@ import java.nio.channels.SocketChannel;
  */
 public class ServerTargetContext extends ServerContext {
     private static final Logger logger = LoggerFactory.getLogger(ServerTargetContext.class);
-
     private boolean closed = false;
 
-    private final SelectionKey selectionKey;
     private final ServerClientContext clientContext;
 
-    public ServerTargetContext(final SelectionKey selectionKey, final ServerClientContext clientContext) {
-        super(ServerContextType.TARGET);
-
-        this.selectionKey = selectionKey;
+    public ServerTargetContext(final SelectionKey key,
+                               final Integer bufferSize,
+                               final ServerClientContext clientContext) {
+        super(ServerContextType.TARGET, key, bufferSize);
         this.clientContext = clientContext;
     }
 
@@ -33,12 +31,13 @@ public class ServerTargetContext extends ServerContext {
         }
         closed = true;
 
-        if (selectionKey != null) {
-            selectionKey.cancel();
+        final SelectionKey key = key();
+        if (key != null) {
+            key.cancel();
 
             try {
-                SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
-                socketChannel.close();
+                SocketChannel channel = (SocketChannel) key.channel();
+                channel.close();
             } catch (IOException e) {
                 logger.warn("close target socket channel exception, msg: {}", e.getMessage());
             }
@@ -47,10 +46,6 @@ public class ServerTargetContext extends ServerContext {
         if (clientContext != null) {
             clientContext.close();
         }
-    }
-
-    public SelectionKey getSelectionKey() {
-        return selectionKey;
     }
 
     public ServerClientContext getClientContext() {

@@ -1,6 +1,5 @@
 package com.github.yukinomiu.hikari.client;
 
-import com.github.yukinomiu.hikari.common.EncryptTransfer;
 import com.github.yukinomiu.hikari.common.HikariStatus;
 import com.github.yukinomiu.hikari.common.PacketContext;
 import org.slf4j.Logger;
@@ -14,24 +13,22 @@ import java.nio.channels.SocketChannel;
  * Yukinomiu
  * 2018/1/24
  */
-public class ClientRemoteContext extends ClientContext implements EncryptTransfer {
+public class ClientRemoteContext extends ClientContext {
     private static final Logger logger = LoggerFactory.getLogger(ClientRemoteContext.class);
-
     private boolean closed = false;
-
-    private final SelectionKey selectionKey;
     private final PacketContext packetContext;
-    private final ClientLocalContext localContext;
 
     private HikariStatus status;
+    private final ClientLocalContext localContext;
 
-    public ClientRemoteContext(final SelectionKey selectionKey, final PacketContext packetContext, final ClientLocalContext localContext, final HikariStatus status) {
-        super(ClientContextType.REMOTE);
-
-        this.selectionKey = selectionKey;
-        this.packetContext = packetContext;
-        this.localContext = localContext;
+    public ClientRemoteContext(final SelectionKey key,
+                               final Integer bufferSize,
+                               final HikariStatus status,
+                               final ClientLocalContext localContext) {
+        super(ClientContextType.REMOTE, key, bufferSize);
+        packetContext = new PacketContext(bufferSize);
         this.status = status;
+        this.localContext = localContext;
     }
 
     @Override
@@ -41,11 +38,12 @@ public class ClientRemoteContext extends ClientContext implements EncryptTransfe
         }
         closed = true;
 
-        if (selectionKey != null) {
-            selectionKey.cancel();
+        final SelectionKey key = key();
+        if (key != null) {
+            key.cancel();
 
             try {
-                SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
+                SocketChannel socketChannel = (SocketChannel) key.channel();
                 socketChannel.close();
             } catch (IOException e) {
                 logger.warn("close remote socket channel exception, msg: {}", e.getMessage());
@@ -57,15 +55,6 @@ public class ClientRemoteContext extends ClientContext implements EncryptTransfe
         }
     }
 
-    public SelectionKey getSelectionKey() {
-        return selectionKey;
-    }
-
-    public ClientLocalContext getLocalContext() {
-        return localContext;
-    }
-
-    @Override
     public PacketContext getPacketContext() {
         return packetContext;
     }
@@ -76,5 +65,9 @@ public class ClientRemoteContext extends ClientContext implements EncryptTransfe
 
     public void setStatus(HikariStatus status) {
         this.status = status;
+    }
+
+    public ClientLocalContext getLocalContext() {
+        return localContext;
     }
 }

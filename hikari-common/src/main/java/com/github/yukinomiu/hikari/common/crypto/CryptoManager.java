@@ -30,7 +30,7 @@ public class CryptoManager {
                 return new RC4Crypto(secret);
 
             default:
-                throw new HikariRuntimeException(String.format("encrypt type '%s' not support", encryptType));
+                throw new HikariRuntimeException(String.format("encrypt type '%s' not supported", encryptType));
         }
     }
 }

@@ -7,9 +7,12 @@ import java.nio.channels.SelectionKey;
  * 2018/1/22
  */
 public interface HikariHandle {
-    void handleAccept(final SelectionKey selectionKey);
 
-    void handleConnect(final SelectionKey selectionKey);
+    void handleAccept(final SelectionKey key);
 
-    void handleRead(final SelectionKey selectionKey);
+    void handleConnect(final SelectionKey key);
+
+    void handleRead(final SelectionKey key);
+
+    void handleWrite(final SelectionKey key);
 }
