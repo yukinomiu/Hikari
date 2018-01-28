@@ -77,7 +77,8 @@ public class ServerHandler extends HikariAbstractHandle {
             ServerClientContext clientContext = new ServerClientContext(clientKey, bufferSize, HikariStatus.HIKARI_AUTH);
             clientKey.attach(clientContext);
         } catch (Exception e) {
-            logger.error("handle accept exception", e);
+            String msg = e.getMessage();
+            logger.warn("handle accept exception: {}", msg != null ? msg : e.getClass().getName());
         }
     }
 
@@ -140,7 +141,8 @@ public class ServerHandler extends HikariAbstractHandle {
             // set status
             clientContext.setStatus(HikariStatus.HIKARI_PROXY);
         } catch (Exception e) {
-            logger.error("handle connect exception", e);
+            String msg = e.getMessage();
+            logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
             targetContext.close();
         }
     }
@@ -177,7 +179,8 @@ public class ServerHandler extends HikariAbstractHandle {
                 throw new HikariRuntimeException(String.format("server context type '%s' not supported", type.name()));
             }
         } catch (Exception e) {
-            logger.error("handle read exception", e);
+            String msg = e.getMessage();
+            logger.warn("handle read exception: {}", msg != null ? msg : e.getClass().getName());
             context.close();
         }
     }
@@ -218,7 +221,8 @@ public class ServerHandler extends HikariAbstractHandle {
                 throw new HikariRuntimeException(String.format("server context type '%s' not supported", type.name()));
             }
         } catch (Exception e) {
-            logger.error("handle write exception", e);
+            String msg = e.getMessage();
+            logger.warn("handle write exception: {}", msg != null ? msg : e.getClass().getName());
             context.close();
         }
     }
