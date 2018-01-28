@@ -19,7 +19,7 @@ public abstract class ServerContext implements HikariContext {
     protected ServerContext(final ServerContextType type, final SelectionKey key, final int bufferSize) {
         this.type = type;
         this.key = key;
-        this.writeBuffer = ByteBuffer.allocateDirect(bufferSize + HikariConstant.PACKET_WRAPPER_SIZE);
+        this.writeBuffer = ByteBuffer.allocateDirect(bufferSize << 1);
     }
 
     @Override
