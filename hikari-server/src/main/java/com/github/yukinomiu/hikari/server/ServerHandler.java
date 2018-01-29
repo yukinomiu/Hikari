@@ -265,15 +265,14 @@ public class ServerHandler extends HikariAbstractHandle {
         if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_DOMAIN) {
             // resolve
             int length = cacheBuffer.get();
-            byte[] tmpArray = new byte[length];
-            cacheBuffer.get(tmpArray, 0, length);
+            byte[] domainByteArray = new byte[length];
+            cacheBuffer.get(domainByteArray, 0, length);
 
-            String domainName = new String(tmpArray, StandardCharsets.US_ASCII);
             InetAddress inetAddress;
             try {
-                inetAddress = InetAddress.getByName(domainName);
+                inetAddress = InetAddress.getByAddress(domainByteArray);
             } catch (UnknownHostException e) {
-                logger.warn("DNS resolve fail: {}", domainName);
+                logger.warn("DNS resolve fail: {}", new String(domainByteArray, StandardCharsets.UTF_8));
                 writeHikariFail(HikariProtocol.AUTH_RESPONSE_DNS_RESOLVE_FAIL, clientChannel, clientContext);
                 return;
             }

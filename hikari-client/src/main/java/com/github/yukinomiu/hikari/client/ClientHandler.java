@@ -244,11 +244,9 @@ public class ClientHandler extends HikariAbstractHandle {
         localContext.setSocksVersion(ver);
 
         if (ver == Socks5Protocol.VERSION_SOCKS5) {
-            // socks5
             processSocks5AuthRead(key, localContext, dataBuffer);
         }
         else if (ver == Socks4Protocol.VERSION_SOCKS4) {
-            // socks4
             processSocks4ReqRead(key, localContext, dataBuffer);
         }
         else {
@@ -316,17 +314,16 @@ public class ClientHandler extends HikariAbstractHandle {
 
         if (addressType == Socks5Protocol.ADDRESS_TYPE_DOMAIN) {
             int length = dataBuffer.get();
-            byte[] tmpArray = new byte[length];
-            dataBuffer.get(tmpArray, 0, length);
+            byte[] domainByteArray = new byte[length];
+            dataBuffer.get(domainByteArray, 0, length);
 
             if (config.getLocalDnsResolve()) {
                 // local dns resolve
-                String domainName = new String(tmpArray, StandardCharsets.US_ASCII);
                 InetAddress inetAddress;
                 try {
-                    inetAddress = InetAddress.getByName(domainName);
+                    inetAddress = InetAddress.getByAddress(domainByteArray);
                 } catch (UnknownHostException e) {
-                    logger.warn("DNS resolve fail: {}", domainName);
+                    logger.warn("DNS resolve fail: {}", new String(domainByteArray, StandardCharsets.UTF_8));
                     writeSocks5Fail(Socks5Protocol.REQ_REPLAY_HOST_UNREACHABLE, localChannel, localContext);
                     return;
                 }
@@ -345,7 +342,7 @@ public class ClientHandler extends HikariAbstractHandle {
             }
             else {
                 hikariAddressType = HikariProtocol.ADDRESS_TYPE_DOMAIN;
-                address = tmpArray;
+                address = domainByteArray;
             }
         }
         else if (addressType == Socks5Protocol.ADDRESS_TYPE_IPV4) {
