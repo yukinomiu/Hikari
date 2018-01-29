@@ -7,7 +7,8 @@ using Hikari protocol. When a connection between Hikari client and Hikari server
 the client side response the SOCKS request and is ready for proxy.
 
 Process:
-local app <---[plain data]---> Hikari client <---[Hikari protocol(encrypted)]---> Hikari server <---[plain data]---> target app
+
+> local app <---[plain data]---> Hikari client <---[Hikari protocol(encrypted)]---> Hikari server <---[plain data]---> target app
 
 ### Usage
 1. Install Java(version 8 or newer);
