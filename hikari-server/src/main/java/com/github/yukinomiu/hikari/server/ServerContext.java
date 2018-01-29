@@ -1,6 +1,5 @@
 package com.github.yukinomiu.hikari.server;
 
-import com.github.yukinomiu.hikari.common.HikariConstant;
 import com.github.yukinomiu.hikari.common.HikariContext;
 
 import java.nio.ByteBuffer;

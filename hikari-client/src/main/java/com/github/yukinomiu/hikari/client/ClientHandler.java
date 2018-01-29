@@ -3,7 +3,8 @@ package com.github.yukinomiu.hikari.client;
 import com.github.yukinomiu.hikari.common.*;
 import com.github.yukinomiu.hikari.common.exception.HikariRuntimeException;
 import com.github.yukinomiu.hikari.common.protocol.HikariProtocol;
-import com.github.yukinomiu.hikari.common.protocol.SocksProtocol;
+import com.github.yukinomiu.hikari.common.protocol.Socks4Protocol;
+import com.github.yukinomiu.hikari.common.protocol.Socks5Protocol;
 import com.github.yukinomiu.hikari.common.util.Md5Util;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,7 +83,7 @@ public class ClientHandler extends HikariAbstractHandle {
 
             SelectionKey localKey = channel.register(selector, SelectionKey.OP_READ);
 
-            ClientLocalContext localContext = new ClientLocalContext(localKey, bufferSize, SocksStatus.SOCKS_AUTH);
+            ClientLocalContext localContext = new ClientLocalContext(localKey, bufferSize, SocksStatus.SOCKS_NEW);
             localKey.attach(localContext);
         } catch (Exception e) {
             String msg = e.getMessage();
@@ -93,9 +94,8 @@ public class ClientHandler extends HikariAbstractHandle {
     @Override
     public void handleConnect(final SelectionKey key) {
         final ClientRemoteContext remoteContext = (ClientRemoteContext) key.attachment();
-        final SocketChannel remoteChannel = (SocketChannel) key.channel();
-
         final ClientLocalContext localContext = remoteContext.getLocalContext();
+        final SocketChannel remoteChannel = (SocketChannel) key.channel();
         final SocketChannel localChannel = (SocketChannel) localContext.key().channel();
 
         try {
@@ -103,38 +103,29 @@ public class ClientHandler extends HikariAbstractHandle {
                 remoteChannel.finishConnect();
             } catch (IOException e) {
                 logger.warn("connect to server fail, msg: {}", e.getMessage());
-                writeSocksFail(SocksProtocol.REQ_REPLAY_HOST_UNREACHABLE, localChannel, remoteContext);
+
+                // response
+                final byte ver = localContext.getSocksVersion();
+
+                if (ver == Socks5Protocol.VERSION_SOCKS5) {
+                    writeSocks5Fail(Socks5Protocol.REQ_REPLAY_CONNECTION_REFUSED, localChannel, remoteContext);
+                }
+                else if (ver == Socks4Protocol.VERSION_SOCKS4) {
+                    writeSocks4Fail(Socks4Protocol.REQ_REPLAY_REJECTED_OR_FAILED, localChannel, remoteContext);
+                }
+                else {
+                    logger.warn("socks version '{}' not supported", ver);
+                    remoteContext.close();
+                }
+
                 return;
             }
 
+            // read read
             key.interestOps(SelectionKey.OP_READ);
 
             // request
-            final byte hikariAddressType = localContext.getHikariAddressType();
-            final byte[] address = localContext.getAddress();
-            final byte[] port = localContext.getPort();
-
-            dataBuffer.clear();
-            dataBuffer.put(HikariProtocol.VERSION_HIKARI1);
-            dataBuffer.put(privateKeyHash);
-            dataBuffer.put(hikariAddressType);
-            if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_DOMAIN) {
-                dataBuffer.put((byte) address.length);
-            }
-            dataBuffer.put(address);
-            dataBuffer.put(port);
-            dataBuffer.flip();
-
-            // encrypt
-            encrypt(dataBuffer, cryptoBuffer, packetBuffer);
-
-            // write
-            remoteChannel.write(packetBuffer);
-            if (packetBuffer.hasRemaining()) {
-                logger.warn("send hikari auth request fail");
-                remoteContext.close();
-                // return;
-            }
+            sendHikariRequest(localContext, remoteContext);
         } catch (Exception e) {
             String msg = e.getMessage();
             logger.warn("handle connect exception: {}", msg != null ? msg : e.getClass().getName());
@@ -153,12 +144,12 @@ public class ClientHandler extends HikariAbstractHandle {
                 final SocksStatus status = localContext.getStatus();
 
                 switch (status) {
-                    case SOCKS_AUTH:
-                        processSocksAuthRead(key, localContext);
+                    case SOCKS_NEW:
+                        processSocksNew(key, localContext);
                         break;
 
-                    case SOCKS_REQ:
-                        processSocksReqRead(key, localContext);
+                    case SOCKS5_REQ:
+                        processSocks5ReqRead(key, localContext);
                         break;
 
                     case SOCKS_PROXY:
@@ -239,20 +230,36 @@ public class ClientHandler extends HikariAbstractHandle {
         }
     }
 
-    private void processSocksAuthRead(final SelectionKey key,
-                                      final ClientLocalContext localContext) throws IOException {
+    private void processSocksNew(final SelectionKey key,
+                                 final ClientLocalContext localContext) throws IOException {
         final SocketChannel localChannel = (SocketChannel) key.channel();
         if (!read(localChannel, dataBuffer, localContext)) {
             return;
         }
 
+        // ver
         final byte ver = dataBuffer.get();
-        if (ver != SocksProtocol.VERSION_SOCKS5) {
+
+        // set context
+        localContext.setSocksVersion(ver);
+
+        if (ver == Socks5Protocol.VERSION_SOCKS5) {
+            // socks5
+            processSocks5AuthRead(key, localContext, dataBuffer);
+        }
+        else if (ver == Socks4Protocol.VERSION_SOCKS4) {
+            // socks4
+            processSocks4ReqRead(key, localContext, dataBuffer);
+        }
+        else {
             logger.warn("socks version '{}' not supported", ver);
             localContext.close();
-            return;
         }
+    }
 
+    private void processSocks5AuthRead(final SelectionKey key,
+                                       final ClientLocalContext localContext,
+                                       final ByteBuffer dataBuffer) throws IOException {
         final byte methods = dataBuffer.get();
         if (dataBuffer.remaining() != methods) {
             logger.warn("bad socks auth request");
@@ -262,11 +269,12 @@ public class ClientHandler extends HikariAbstractHandle {
 
         // response
         dataBuffer.clear();
-        dataBuffer.put(SocksProtocol.VERSION_SOCKS5);
-        dataBuffer.put(SocksProtocol.AUTH_METHOD_NO_AUTH);
+        dataBuffer.put(Socks5Protocol.VERSION_SOCKS5);
+        dataBuffer.put(Socks5Protocol.AUTH_METHOD_NO_AUTH);
         dataBuffer.flip();
 
         // write
+        final SocketChannel localChannel = (SocketChannel) key.channel();
         localChannel.write(dataBuffer);
         if (dataBuffer.hasRemaining()) {
             logger.warn("send socks auth response fail");
@@ -275,11 +283,11 @@ public class ClientHandler extends HikariAbstractHandle {
         }
 
         // set status
-        localContext.setStatus(SocksStatus.SOCKS_REQ);
+        localContext.setStatus(SocksStatus.SOCKS5_REQ);
     }
 
-    private void processSocksReqRead(final SelectionKey key,
-                                     final ClientLocalContext localContext) throws IOException {
+    private void processSocks5ReqRead(final SelectionKey key,
+                                      final ClientLocalContext localContext) throws IOException {
         final SocketChannel localChannel = (SocketChannel) key.channel();
         if (!read(localChannel, dataBuffer, localContext)) {
             return;
@@ -293,8 +301,8 @@ public class ClientHandler extends HikariAbstractHandle {
 
         // command
         final byte command = dataBuffer.get();
-        if (command != SocksProtocol.REQ_COMMAND_CONNECT) {
-            writeSocksFail(SocksProtocol.REQ_REPLAY_COMMAND_NOT_SUPPORTED, localChannel, localContext);
+        if (command != Socks5Protocol.REQ_COMMAND_CONNECT) {
+            writeSocks5Fail(Socks5Protocol.REQ_REPLAY_COMMAND_NOT_SUPPORTED, localChannel, localContext);
             return;
         }
 
@@ -306,7 +314,7 @@ public class ClientHandler extends HikariAbstractHandle {
         final byte hikariAddressType;
         final byte[] address;
 
-        if (addressType == SocksProtocol.ADDRESS_TYPE_DOMAIN) {
+        if (addressType == Socks5Protocol.ADDRESS_TYPE_DOMAIN) {
             int length = dataBuffer.get();
             byte[] tmpArray = new byte[length];
             dataBuffer.get(tmpArray, 0, length);
@@ -319,7 +327,7 @@ public class ClientHandler extends HikariAbstractHandle {
                     inetAddress = InetAddress.getByName(domainName);
                 } catch (UnknownHostException e) {
                     logger.warn("DNS resolve fail: {}", domainName);
-                    writeSocksFail(SocksProtocol.REQ_REPLAY_HOST_UNREACHABLE, localChannel, localContext);
+                    writeSocks5Fail(Socks5Protocol.REQ_REPLAY_HOST_UNREACHABLE, localChannel, localContext);
                     return;
                 }
 
@@ -340,20 +348,20 @@ public class ClientHandler extends HikariAbstractHandle {
                 address = tmpArray;
             }
         }
-        else if (addressType == SocksProtocol.ADDRESS_TYPE_IPV4) {
+        else if (addressType == Socks5Protocol.ADDRESS_TYPE_IPV4) {
             address = new byte[4];
             dataBuffer.get(address, 0, 4);
 
             hikariAddressType = HikariProtocol.ADDRESS_TYPE_IPV4;
         }
-        else if (addressType == SocksProtocol.ADDRESS_TYPE_IPV6) {
+        else if (addressType == Socks5Protocol.ADDRESS_TYPE_IPV6) {
             address = new byte[16];
             dataBuffer.get(address, 0, 16);
 
             hikariAddressType = HikariProtocol.ADDRESS_TYPE_IPV6;
         }
         else {
-            writeSocksFail(SocksProtocol.REQ_REPLAY_ADDRESS_TYPE_NOT_SUPPORTED, localChannel, localContext);
+            writeSocks5Fail(Socks5Protocol.REQ_REPLAY_ADDRESS_TYPE_NOT_SUPPORTED, localChannel, localContext);
             return;
         }
 
@@ -369,6 +377,66 @@ public class ClientHandler extends HikariAbstractHandle {
 
         // set context
         localContext.setHikariAddressType(hikariAddressType);
+        localContext.setAddress(address);
+        localContext.setPort(port);
+
+        // connection to server
+        final SocketAddress serverAddress = getServerAddress();
+        final SelectionKey localKey = localContext.key();
+        final Selector selector = localKey.selector();
+
+        SocketChannel remoteChannel = SocketChannel.open();
+        remoteChannel.configureBlocking(false);
+
+        final SelectionKey remoteKey = remoteChannel.register(selector, SelectionKey.OP_CONNECT);
+
+        ClientRemoteContext remoteContext = new ClientRemoteContext(remoteKey, bufferSize, HikariStatus.HIKARI_AUTH, localContext);
+        remoteKey.attach(remoteContext);
+
+        localContext.setRemoteContext(remoteContext);
+
+        boolean connectedNow = remoteChannel.connect(serverAddress);
+        if (connectedNow) {
+            handleConnect(remoteKey);
+        }
+    }
+
+    private void processSocks4ReqRead(final SelectionKey key,
+                                      final ClientLocalContext localContext,
+                                      final ByteBuffer dataBuffer) throws IOException {
+        final SocketChannel localChannel = (SocketChannel) key.channel();
+
+        // cancel
+        key.interestOps(0);
+
+        // command
+        final byte command = dataBuffer.get();
+        if (command != Socks4Protocol.REQ_COMMAND_CONNECT) {
+            writeSocks4Fail(Socks4Protocol.REQ_REPLAY_REJECTED_OR_FAILED, localChannel, localContext);
+            return;
+        }
+
+        // port
+        final byte[] port = new byte[2];
+        dataBuffer.get(port, 0, 2);
+
+        // address
+        final byte[] address = new byte[4];
+        dataBuffer.get(address, 0, 4);
+
+        // ignore user id
+
+        // null
+        dataBuffer.position(dataBuffer.limit() - 1);
+        final byte end = dataBuffer.get();
+        if (end != Socks4Protocol.REQ_REPLAY_NULL) {
+            logger.warn("bad socks req request");
+            localContext.close();
+            return;
+        }
+
+        // set context
+        localContext.setHikariAddressType(HikariProtocol.ADDRESS_TYPE_IPV4);
         localContext.setAddress(address);
         localContext.setPort(port);
 
@@ -436,22 +504,22 @@ public class ClientHandler extends HikariAbstractHandle {
             case HikariProtocol.AUTH_RESPONSE_OK:
                 // bind address type and address
                 final byte bindHikariAddressType = cacheBuffer.get();
-                final byte socksAddressType;
+                final byte socks5AddressType;
                 final byte[] bindAddress;
 
                 if (bindHikariAddressType == HikariProtocol.ADDRESS_TYPE_IPV4) {
-                    socksAddressType = SocksProtocol.ADDRESS_TYPE_IPV4;
+                    socks5AddressType = Socks5Protocol.ADDRESS_TYPE_IPV4;
                     bindAddress = new byte[4];
                     cacheBuffer.get(bindAddress, 0, 4);
                 }
                 else if (bindHikariAddressType == HikariProtocol.ADDRESS_TYPE_IPV6) {
-                    socksAddressType = SocksProtocol.ADDRESS_TYPE_IPV6;
+                    socks5AddressType = Socks5Protocol.ADDRESS_TYPE_IPV6;
                     bindAddress = new byte[16];
                     cacheBuffer.get(bindAddress, 0, 16);
                 }
                 else {
-                    logger.warn("bad server response, hikari address type: {}", bindHikariAddressType);
-                    writeSocksFail(SocksProtocol.REQ_REPLAY_GENERAL_FAILURE, localChannel, remoteContext);
+                    logger.warn("hikari address type '%s' not supported", bindHikariAddressType);
+                    remoteContext.close();
                     return;
                 }
 
@@ -460,15 +528,32 @@ public class ClientHandler extends HikariAbstractHandle {
                 cacheBuffer.get(bindPort, 0, 2);
 
                 // response
-                dataBuffer.clear();
-                dataBuffer.put(SocksProtocol.VERSION_SOCKS5);
-                dataBuffer.put(SocksProtocol.REQ_REPLAY_SUCCEEDED);
-                dataBuffer.put((byte) 0x00);
-                dataBuffer.put(socksAddressType);
-                dataBuffer.put(bindAddress);
-                dataBuffer.put(bindPort);
-                dataBuffer.flip();
-                localChannel.write(dataBuffer);
+                final byte ver = localContext.getSocksVersion();
+                if (ver == Socks5Protocol.VERSION_SOCKS5) {
+                    dataBuffer.clear();
+                    dataBuffer.put(Socks5Protocol.VERSION_SOCKS5);
+                    dataBuffer.put(Socks5Protocol.REQ_REPLAY_SUCCEEDED);
+                    dataBuffer.put((byte) 0x00);
+                    dataBuffer.put(socks5AddressType);
+                    dataBuffer.put(bindAddress);
+                    dataBuffer.put(bindPort);
+                    dataBuffer.flip();
+                    localChannel.write(dataBuffer);
+                }
+                else if (ver == Socks4Protocol.VERSION_SOCKS4) {
+                    dataBuffer.clear();
+                    dataBuffer.put(Socks4Protocol.REQ_REPLAY_VN);
+                    dataBuffer.put(Socks4Protocol.REQ_REPLAY_GRANTED);
+                    dataBuffer.put(localContext.getPort());
+                    dataBuffer.put(localContext.getAddress());
+                    dataBuffer.flip();
+                    localChannel.write(dataBuffer);
+                }
+                else {
+                    logger.warn("socks version '{}' not supported", ver);
+                    remoteContext.close();
+                    return;
+                }
 
                 if (dataBuffer.hasRemaining()) {
                     logger.warn("send socks req response fail");
@@ -500,12 +585,12 @@ public class ClientHandler extends HikariAbstractHandle {
 
             case HikariProtocol.AUTH_RESPONSE_VERSION_NOT_SUPPORT:
                 logger.warn("server: hikari version not supported");
-                writeSocksFail(SocksProtocol.REQ_REPLAY_GENERAL_FAILURE, localChannel, remoteContext);
+                writeSocks5Fail(Socks5Protocol.REQ_REPLAY_GENERAL_FAILURE, localChannel, remoteContext);
                 break;
 
             case HikariProtocol.AUTH_RESPONSE_AUTH_FAIL:
                 logger.warn("server: auth fail");
-                writeSocksFail(SocksProtocol.REQ_REPLAY_GENERAL_FAILURE, localChannel, remoteContext);
+                writeSocks5Fail(Socks5Protocol.REQ_REPLAY_GENERAL_FAILURE, localChannel, remoteContext);
                 break;
 
             case HikariProtocol.AUTH_RESPONSE_DNS_RESOLVE_FAIL:
@@ -513,17 +598,17 @@ public class ClientHandler extends HikariAbstractHandle {
                 String domainName = new String(address, StandardCharsets.US_ASCII);
 
                 logger.warn("server: DNS resolve fail, domain name: {}", domainName);
-                writeSocksFail(SocksProtocol.REQ_REPLAY_HOST_UNREACHABLE, localChannel, remoteContext);
+                writeSocks5Fail(Socks5Protocol.REQ_REPLAY_HOST_UNREACHABLE, localChannel, remoteContext);
                 break;
 
             case HikariProtocol.AUTH_RESPONSE_CONNECT_TARGET_FAIL:
                 logger.warn("server: connect to target fail");
-                writeSocksFail(SocksProtocol.REQ_REPLAY_NETWORK_UNREACHABLE, localChannel, remoteContext);
+                writeSocks5Fail(Socks5Protocol.REQ_REPLAY_NETWORK_UNREACHABLE, localChannel, remoteContext);
                 break;
 
             default:
                 logger.warn("bad server response, reply: {}", reply);
-                writeSocksFail(SocksProtocol.REQ_REPLAY_GENERAL_FAILURE, localChannel, remoteContext);
+                writeSocks5Fail(Socks5Protocol.REQ_REPLAY_GENERAL_FAILURE, localChannel, remoteContext);
                 break;
         }
     }
@@ -550,20 +635,11 @@ public class ClientHandler extends HikariAbstractHandle {
         write(remoteContext, localContext, cacheBuffer);
     }
 
-    private SocketAddress getServerAddress() {
-        SocketAddress serverAddress = serverAddressArray[currentAddressIndex++];
-        if (currentAddressIndex > maxAddressIndex) {
-            currentAddressIndex = 0;
-        }
-
-        return serverAddress;
-    }
-
-    private void writeSocksFail(final byte rsp,
-                                final SocketChannel channel,
-                                final ClientContext context) throws IOException {
+    private void writeSocks4Fail(final byte rsp,
+                                 final SocketChannel channel,
+                                 final ClientContext context) throws IOException {
         dataBuffer.clear();
-        dataBuffer.put(SocksProtocol.VERSION_SOCKS5);
+        dataBuffer.put(Socks4Protocol.REQ_REPLAY_VN);
         dataBuffer.put(rsp);
         dataBuffer.flip();
 
@@ -574,5 +650,61 @@ public class ClientHandler extends HikariAbstractHandle {
         }
 
         context.close();
+    }
+
+    private void writeSocks5Fail(final byte rsp,
+                                 final SocketChannel channel,
+                                 final ClientContext context) throws IOException {
+        dataBuffer.clear();
+        dataBuffer.put(Socks5Protocol.VERSION_SOCKS5);
+        dataBuffer.put(rsp);
+        dataBuffer.flip();
+
+        // write
+        channel.write(dataBuffer);
+        if (dataBuffer.hasRemaining()) {
+            logger.warn("send socks req response fail");
+        }
+
+        context.close();
+    }
+
+    private void sendHikariRequest(final ClientLocalContext localContext, final ClientRemoteContext remoteContext) throws IOException {
+        final SocketChannel remoteChannel = (SocketChannel) remoteContext.key().channel();
+
+        final byte hikariAddressType = localContext.getHikariAddressType();
+        final byte[] address = localContext.getAddress();
+        final byte[] port = localContext.getPort();
+
+        // request
+        dataBuffer.clear();
+        dataBuffer.put(HikariProtocol.VERSION_HIKARI1);
+        dataBuffer.put(privateKeyHash);
+        dataBuffer.put(hikariAddressType);
+        if (hikariAddressType == HikariProtocol.ADDRESS_TYPE_DOMAIN) {
+            dataBuffer.put((byte) address.length);
+        }
+        dataBuffer.put(address);
+        dataBuffer.put(port);
+        dataBuffer.flip();
+
+        // encrypt
+        encrypt(dataBuffer, cryptoBuffer, packetBuffer);
+
+        // write
+        remoteChannel.write(packetBuffer);
+        if (packetBuffer.hasRemaining()) {
+            logger.warn("send hikari auth request fail");
+            remoteContext.close();
+        }
+    }
+
+    private SocketAddress getServerAddress() {
+        SocketAddress serverAddress = serverAddressArray[currentAddressIndex++];
+        if (currentAddressIndex > maxAddressIndex) {
+            currentAddressIndex = 0;
+        }
+
+        return serverAddress;
     }
 }

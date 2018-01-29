@@ -4,17 +4,17 @@ package com.github.yukinomiu.hikari.common.protocol;
  * Yukinomiu
  * 2017/12/27
  */
-public class SocksProtocol {
-    private SocksProtocol() {
+public class Socks5Protocol {
+    private Socks5Protocol() {
     }
+
+    // version
+    public static final byte VERSION_SOCKS5 = 0x05;
 
     // address type
     public static final byte ADDRESS_TYPE_IPV4 = 0X01;
     public static final byte ADDRESS_TYPE_DOMAIN = 0X03;
     public static final byte ADDRESS_TYPE_IPV6 = 0X04;
-
-    // version
-    public static final byte VERSION_SOCKS5 = 0x05;
 
     // auth method
     public static final byte AUTH_METHOD_NO_AUTH = 0x00;

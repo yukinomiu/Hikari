@@ -19,6 +19,10 @@ public class ClientLocalContext extends ClientContext {
     private SocksStatus status;
     private ClientRemoteContext remoteContext;
 
+    // socks protocol
+    private byte socksVersion;
+
+    // target info
     private byte hikariAddressType;
     private byte[] address;
     private byte[] port;
@@ -68,6 +72,14 @@ public class ClientLocalContext extends ClientContext {
 
     public void setRemoteContext(ClientRemoteContext remoteContext) {
         this.remoteContext = remoteContext;
+    }
+
+    public byte getSocksVersion() {
+        return socksVersion;
+    }
+
+    public void setSocksVersion(byte socksVersion) {
+        this.socksVersion = socksVersion;
     }
 
     public byte getHikariAddressType() {

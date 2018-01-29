@@ -7,6 +7,7 @@ import java.nio.ByteBuffer;
  * 2018/1/27
  */
 public class PlainCrypto implements HikariCrypto {
+
     @Override
     public void encrypt(ByteBuffer input, ByteBuffer output) {
         output.put(input);

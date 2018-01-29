@@ -5,6 +5,7 @@ package com.github.yukinomiu.hikari.common;
  * 2018/1/26
  */
 public class HikariConstant {
+
     private HikariConstant() {
     }
 
