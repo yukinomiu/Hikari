@@ -269,10 +269,11 @@ public class ServerHandler extends HikariAbstractHandle {
             cacheBuffer.get(domainByteArray, 0, length);
 
             InetAddress inetAddress;
+            final String domain = new String(domainByteArray, StandardCharsets.UTF_8);
             try {
-                inetAddress = InetAddress.getByAddress(domainByteArray);
+                inetAddress = InetAddress.getByName(domain);
             } catch (UnknownHostException e) {
-                logger.warn("DNS resolve fail: {}", new String(domainByteArray, StandardCharsets.UTF_8));
+                logger.warn("DNS resolve fail: {}", domain);
                 writeHikariFail(HikariProtocol.AUTH_RESPONSE_DNS_RESOLVE_FAIL, clientChannel, clientContext);
                 return;
             }

@@ -320,10 +320,11 @@ public class ClientHandler extends HikariAbstractHandle {
             if (config.getLocalDnsResolve()) {
                 // local dns resolve
                 InetAddress inetAddress;
+                final String domain = new String(domainByteArray, StandardCharsets.UTF_8);
                 try {
-                    inetAddress = InetAddress.getByAddress(domainByteArray);
+                    inetAddress = InetAddress.getByName(domain);
                 } catch (UnknownHostException e) {
-                    logger.warn("DNS resolve fail: {}", new String(domainByteArray, StandardCharsets.UTF_8));
+                    logger.warn("DNS resolve fail: {}", domain);
                     writeSocks5Fail(Socks5Protocol.REQ_REPLAY_HOST_UNREACHABLE, localChannel, localContext);
                     return;
                 }
