@@ -20,6 +20,6 @@ public class HikariProtocol {
     public static final byte AUTH_RESPONSE_OK = 0x00;
     public static final byte AUTH_RESPONSE_VERSION_NOT_SUPPORT = 0x01;
     public static final byte AUTH_RESPONSE_AUTH_FAIL = 0x02;
-    public static final byte AUTH_RESPONSE_DNS_RESOLVE_FAIL = 0x04;
-    public static final byte AUTH_RESPONSE_CONNECT_TARGET_FAIL = 0x05;
+    public static final byte AUTH_RESPONSE_DNS_RESOLVE_FAIL = 0x03;
+    public static final byte AUTH_RESPONSE_CONNECT_TARGET_FAIL = 0x04;
 }
